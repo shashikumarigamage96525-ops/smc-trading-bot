@@ -1,0 +1,7 @@
+streamlit
+ccxt
+pandas
+plotly
+websocket-client
+pandas_ta
+requests
