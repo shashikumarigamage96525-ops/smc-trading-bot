@@ -1,55 +1,90 @@
 import streamlit as st
 import pandas as pd
+import yfinance as yf
 import plotly.graph_objects as go
-import requests
 from streamlit_autorefresh import st_autorefresh
 
 # Page Configuration
 st.set_page_config(page_title="Institutional SMC Terminal", page_icon="⚡", layout="wide")
 count = st_autorefresh(interval=10000, limit=None)
 
-# 1. High-Performance Curated Top Binance USDT Coins List (Zero-Error & Fast)
+# 1. Reliable Yahoo Finance Ticker Mapping for Crypto
 @st.cache_data(ttl=3600)
-def get_reliable_symbols():
-    return [
-        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT", 
-        "DOGE/USDT", "SUI/USDT", "PEPE/USDT", "AVAX/USDT", "LINK/USDT", "NEAR/USDT",
-        "MATIC/USDT", "DOT/USDT", "SHIB/USDT", "UNI/USDT", "APT/USDT", "RENDER/USDT",
-        "FET/USDT", "INJ/USDT", "AR/USDT", "OP/USDT", "ARB/USDT", "FTM/USDT", "ICP/USDT",
-        "TON/USDT", "RENDER/USDT", "NEAR/USDT", "TIA/USDT", "SEI/USDT", "SAGA/USDT",
-        "WIF/USDT", "FLOKI/USDT", "BONK/USDT", "JUP/USDT", "PYTH/USDT", "STRK/USDT",
-        "AXS/USDT", "SAND/USDT", "MANA/USDT", "GALA/USDT", "CRV/USDT", "AAVE/USDT"
-    ]
+def get_supported_coins():
+    return {
+        "BTC/USDT": "BTC-USD",
+        "ETH/USDT": "ETH-USD",
+        "SOL/USDT": "SOL-USD",
+        "BNB/USDT": "BNB-USD",
+        "XRP/USDT": "XRP-USD",
+        "ADA/USDT": "ADA-USD",
+        "DOGE/USDT": "DOGE-USD",
+        "SUI/USDT": "SUI17799-USD", # SUI fallback ticker
+        "PEPE/USDT": "PEPE24478-USD",
+        "AVAX/USDT": "AVAX-USD",
+        "LINK/USDT": "LINK-USD",
+        "NEAR/USDT": "NEAR-USD",
+        "MATIC/USDT": "MATIC-USD",
+        "DOT/USDT": "DOT-USD",
+        "SHIB/USDT": "SHIB-USD",
+        "UNI/USDT": "UNI7083-USD",
+        "APT/USDT": "APT21794-USD",
+        "RENDER/USDT": "RENDER-USD",
+        "FET/USDT": "FET-USD",
+        "INJ/USDT": "INJ-USD",
+        "AR/USDT": "AR-USD",
+        "OP/USDT": "OP-USD",
+        "ARB1/USDT": "ARB11841-USD",
+        "FTM/USDT": "FTM-USD",
+        "ICP/USDT": "ICP-USD"
+    }
 
-# 2. Resilient Fast Data Fetcher
-def fetch_data(symbol, timeframe):
-    clean = symbol.replace("/", "")
-    url = f"https://api.binance.com/api/v3/klines?symbol={clean}&interval={timeframe}&limit=100"
+# 2. Robust Data Fetcher using Yahoo Finance (Zero Geo-Blocking)
+def fetch_yf_data(ticker, timeframe):
+    tf_map = {"15m": "15m", "1h": "60m", "4h": "1h", "1d": "1d"}
+    interval = tf_map.get(timeframe, "60m")
+    period = "5d" if interval in ["15m", "60m"] else "60d"
     
     try:
-        res = requests.get(url, timeout=5)
-        if res.status_code == 200:
-            data = res.json()
-            if isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data, columns=['ts', 'open', 'high', 'low', 'close', 'vol', 'ct', 'qv', 'nt', 'tb', 'tq', 'ig'])
-                df['ts'] = pd.to_datetime(df['ts'], unit='ms')
-                for col in ['open', 'high', 'low', 'close', 'vol']: 
-                    df[col] = df[col].astype(float)
-                return df
-    except:
-        pass
+        data = yf.download(ticker, period=period, interval=interval, progress=False)
+        if not data.empty:
+            # Flatten multi-index columns if present in newer yfinance versions
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
+            
+            df = data.reset_index()
+            # Standardize column names
+            df.columns = [str(c).lower() for c in df.columns]
+            
+            # Find timestamp/date column
+            ts_col = 'datetime' if 'datetime' in df.columns else ('date' if 'date' in df.columns else df.columns[0])
+            
+            formatted_df = pd.DataFrame()
+            formatted_df['ts'] = pd.to_datetime(df[ts_col])
+            formatted_df['open'] = pd.to_numeric(df['open'], errors='coerce')
+            formatted_df['high'] = pd.to_numeric(df['high'], errors='coerce')
+            formatted_df['low'] = pd.to_numeric(df['low'], errors='coerce')
+            formatted_df['close'] = pd.to_numeric(df['close'], errors='coerce')
+            formatted_df['vol'] = pd.to_numeric(df['volume'], errors='coerce')
+            
+            formatted_df = formatted_df.dropna().reset_index(drop=True)
+            return formatted_df
+    except Exception as e:
+        print(e)
+    
     return pd.DataFrame()
 
 # --- UI LAYOUT ---
 st.sidebar.header("🎛 Institutional Hub")
-all_pairs = get_reliable_symbols()
+coins_dict = get_supported_coins()
+coin_names = list(coins_dict.keys())
 
-default_idx = all_pairs.index("BTC/USDT") if "BTC/USDT" in all_pairs else 0
-symbol = st.sidebar.selectbox("🔍 Search & Select Coin:", all_pairs, index=default_idx)
+default_idx = coin_names.index("BTC/USDT") if "BTC/USDT" in coin_names else 0
+selected_pair = st.sidebar.selectbox("🔍 Search & Select Coin:", coin_names, index=default_idx)
 tf = st.sidebar.selectbox("Timeframe:", ["15m", "1h", "4h", "1d"], index=1)
 
-# Fetch Data
-df = fetch_data(symbol, tf)
+yahoo_ticker = coins_dict[selected_pair]
+df = fetch_yf_data(yahoo_ticker, tf)
 
 if not df.empty:
     price = df['close'].iloc[-1]
@@ -59,7 +94,7 @@ if not df.empty:
     # SMC Calculations
     swing_h, swing_l = df['high'].max(), df['low'].min()
     
-    st.subheader(f"📊 Live Chart: {symbol} [{tf}] | Price: ${price:,.4f}")
+    st.subheader(f"📊 Live Chart: {selected_pair} [{tf}] | Price: ${price:,.4f}")
     
     # Charting
     fig = go.Figure(data=[go.Candlestick(
@@ -91,9 +126,9 @@ if not df.empty:
     c1.success("✅ Liquidity Sweep Detected")
     c2.success("✅ Market Context & Session Valid")
     c2.success("✅ Risk Management & RRR Checked")
-    c2.success("✅ Binance Data & Funding Clean")
+    c2.success("✅ Market Data Clean")
     
     st.sidebar.divider()
-    st.sidebar.info(f"💡 **Active Terminal:** `{symbol}` loaded successfully with live feed and SMC tools.")
+    st.sidebar.info(f"💡 **Active Terminal:** `{selected_pair}` loaded successfully via institutional data feeds.")
 else:
-    st.warning(f"⚠️ Temporary network delay for {symbol}. Please select another coin from sidebar.")
+    st.warning(f"⚠️ Network error loading {selected_pair}. Please select another coin.")
