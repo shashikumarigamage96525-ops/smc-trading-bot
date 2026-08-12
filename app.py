@@ -11,14 +11,21 @@ st.set_page_config(
 )
 
 # Initialize Binance Spot Exchange via CCXT
+# Initialize Binance Spot Exchange via CCXT with Geo-restriction Fix
 @st.cache_resource
 def init_exchange():
-    return ccxt.binance({
+    ex = ccxt.binance({
         'enableRateLimit': True,
         'options': {'defaultType': 'spot'}
     })
+    ex.urls['api'] = {
+        'public': 'https://data-api.binance.vision/api/v3',
+        'private': 'https://api.binance.com/api/v3',
+    }
+    return ex
 
 exchange = init_exchange()
+
 
 # 2. Dynamic Symbol Fetcher (Loads all active USDT pairs including new listings like ACE)
 @st.cache_data(ttl=300)
