@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import requests
+import yfinance as yf
 import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 
@@ -24,43 +24,68 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 1. Direct Binance Symbols List (Zero Error & Fast)
+# 1. Reliable Yahoo Finance Ticker Mapping for Crypto (Zero Geo-Blocking)
 @st.cache_data(ttl=3600)
-def get_binance_symbols():
-    return [
-        "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", 
-        "ADAUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT", 
-        "LINKUSDT", "NEARUSDT", "MATICUSDT", "DOTUSDT", "SHIBUSDT", 
-        "UNIUSDT", "APTUSDT", "RENDERUSDT", "FETUSDT", "INJUSDT"
-    ]
+def get_supported_coins():
+    return {
+        "BTC/USDT": "BTC-USD",
+        "ETH/USDT": "ETH-USD",
+        "SOL/USDT": "SOL-USD",
+        "BNB/USDT": "BNB-USD",
+        "XRP/USDT": "XRP-USD",
+        "ADA/USDT": "ADA-USD",
+        "DOGE/USDT": "DOGE-USD",
+        "SUI/USDT": "SUI17799-USD",
+        "PEPE/USDT": "PEPE24478-USD",
+        "AVAX/USDT": "AVAX-USD",
+        "LINK/USDT": "LINK-USD",
+        "NEAR/USDT": "NEAR-USD",
+        "DOT/USDT": "DOT-USD",
+        "SHIB/USDT": "SHIB-USD",
+        "UNI/USDT": "UNI7083-USD",
+        "APT/USDT": "APT21794-USD",
+        "RENDER/USDT": "RENDER-USD",
+        "FET/USDT": "FET-USD",
+        "INJ/USDT": "INJ-USD",
+        "OP/USDT": "OP-USD"
+    }
 
-# 2. Ultra-Fast Direct Binance Kline Fetcher (No IP blocks)
-def fetch_binance_data(symbol, timeframe):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={timeframe}&limit=100"
+# 2. Robust Data Fetcher via Yahoo Finance
+def fetch_yahoo_data(ticker, timeframe):
+    tf_map = {"15m": "15m", "1h": "60m", "4h": "1h", "1d": "1d"}
+    interval = tf_map.get(timeframe, "60m")
+    period = "5d" if interval in ["15m", "60m"] else "60d"
+    
     try:
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data, columns=[
-                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                    'close_time', 'quote_asset_volume', 'number_of_trades',
-                    'taker_buy_base', 'taker_buy_quote', 'ignore'
-                ])
-                df['ts'] = pd.to_datetime(df['timestamp'], unit='ms')
-                for col in ['open', 'high', 'low', 'close', 'volume']:
-                    df[col] = df[col].astype(float)
-                return df
+        data = yf.download(ticker, period=period, interval=interval, progress=False)
+        if not data.empty:
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
+            
+            df = data.reset_index()
+            df.columns = [str(c).lower() for c in df.columns]
+            ts_col = 'datetime' if 'datetime' in df.columns else ('date' if 'date' in df.columns else df.columns[0])
+            
+            formatted_df = pd.DataFrame()
+            formatted_df['ts'] = pd.to_datetime(df[ts_col])
+            formatted_df['open'] = pd.to_numeric(df['open'], errors='coerce')
+            formatted_df['high'] = pd.to_numeric(df['high'], errors='coerce')
+            formatted_df['low'] = pd.to_numeric(df['low'], errors='coerce')
+            formatted_df['close'] = pd.to_numeric(df['close'], errors='coerce')
+            
+            formatted_df = formatted_df.dropna().reset_index(drop=True)
+            return formatted_df
     except:
         pass
     return pd.DataFrame()
 
 # --- SIDEBAR: SEARCH & CONTROLS ---
 st.sidebar.markdown("## 🎛 Institutional Hub")
-all_symbols = get_binance_symbols()
+coins_dict = get_supported_coins()
+coin_names = list(coins_dict.keys())
 
-default_idx = all_symbols.index("BTCUSDT") if "BTCUSDT" in all_symbols else 0
-selected_symbol = st.sidebar.selectbox("🔍 Search & Select Coin:", all_symbols, index=default_idx)
+default_idx = coin_names.index("BTC/USDT") if "BTC/USDT" in coin_names else 0
+selected_pair = st.sidebar.selectbox("🔍 Search & Select Coin:", coin_names, index=default_idx)
 tf = st.sidebar.selectbox("Primary Timeframe:", ["15m", "1h", "4h", "1d"], index=1)
 
 # MTF Confluence Settings in Sidebar
@@ -69,7 +94,8 @@ st.sidebar.markdown("### ⏳ Multi-Timeframe Matrix")
 mtf_check = st.sidebar.checkbox("Enable MTF Confluence Check", value=True)
 
 # Fetch Data
-df = fetch_binance_data(selected_symbol, tf)
+yahoo_ticker = coins_dict[selected_pair]
+df = fetch_yahoo_data(yahoo_ticker, tf)
 
 if not df.empty:
     price = df['close'].iloc[-1]
@@ -90,7 +116,7 @@ if not df.empty:
     
     # --- MAIN UI TITLE & METRICS HEADER ---
     st.markdown(f"# ⚡ Smart Money Concept (SMC) Terminal")
-    st.markdown(f"### Live Asset: `{selected_symbol[:-4]}/USDT` | Timeframe: `{tf}`")
+    st.markdown(f"### Live Asset: `{selected_pair}` | Timeframe: `{tf}`")
     
     # --- PLOTLY CHART WITH ALL MARKINGS (Entry, SL, TP, BSL, SSL) ---
     fig = go.Figure(data=[go.Candlestick(
@@ -158,6 +184,6 @@ if not df.empty:
     c2.success("✅ Multi-Timeframe Bias Aligned")
     
     st.sidebar.markdown("---")
-    st.sidebar.success(f"💡 **Status:** `{selected_symbol[:-4]}/USDT` loaded successfully via Binance Direct Feed.")
+    st.sidebar.success(f"💡 **Status:** `{selected_pair}` loaded successfully via Institutional Feed.")
 else:
-    st.warning(f"⚠️ Network delay loading {selected_symbol}. Please select another coin from the sidebar.")
+    st.warning(f"⚠️ Network error loading {selected_pair}. Please select another coin from the sidebar.")
