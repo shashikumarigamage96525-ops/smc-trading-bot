@@ -8,7 +8,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # 1. Page Configuration & Setup
 st.set_page_config(
-    page_title="Institutional Advanced Technical Analysis Terminal",
+    page_title="Institutional Trading Terminal",
     page_icon="⚡",
     layout="wide"
 )
@@ -27,8 +27,8 @@ def fetch_available_coins():
         "ATOM/USDT", "LTC/USDT", "BCH/USDT", "ETC/USDT", "XLM/USDT"
     ]
 
-# 3. Fetch OHLCV Chart Data
-def fetch_chart_data(symbol, timeframe='1h', limit=150):
+# 3. Fetch OHLCV Chart Data (Increased limit to 200 for clean mobile candle width)
+def fetch_chart_data(symbol, timeframe='1h', limit=200):
     try:
         clean_symbol = symbol.replace("/", "")
         url = f"https://api.binance.com/api/v3/klines?symbol={clean_symbol}&interval={timeframe}&limit={limit}"
@@ -62,32 +62,30 @@ def calculate_indicators(df):
     df['RSI'] = 100 - (100 / (1 + rs))
     return df
 
-# 5. Technical Pattern, S&R & Liquidity Recognition Engine
+# 5. Stable Technical Analysis & S&R Engine
 def technical_analysis_engine(df):
     if df.empty or len(df) < 30:
-        return [], [], [], "NEUTRAL", []
+        return [], [], {}, "NEUTRAL", []
     
     highs = df['high'].values
     lows = df['low'].values
     closes = df['close'].values
     
     supports, resistances = [], []
-    for i in range(4, len(df) - 4):
-        if highs[i] == max(highs[i-4:i+4]):
+    for i in range(5, len(df) - 5):
+        if highs[i] == max(highs[i-5:i+5]):
             resistances.append(highs[i])
-        if lows[i] == min(lows[i-4:i+4]):
+        if lows[i] == min(lows[i-5:i+5]):
             supports.append(lows[i])
             
     supports = sorted(list(set(supports)))[-3:]
     resistances = sorted(list(set(resistances)))[:3]
     
-    # Liquidity Zones (High concentration of stop losses above swing highs and below swing lows)
     liquidity_pools = {
         'buy_side': max(highs) * 1.002,
         'sell_side': min(lows) * 0.998
     }
     
-    # Trend Determination
     current_close = closes[-1]
     ema_50 = df['EMA_50'].iloc[-1]
     ema_200 = df['EMA_200'].iloc[-1]
@@ -99,16 +97,7 @@ def technical_analysis_engine(df):
     else:
         trend = "CONSOLIDATION / RANGING ⚪"
         
-    # Pattern Recognition
-    detected_patterns = []
-    # Double Bottom Check
-    recent_lows = lows[-20:]
-    troughs = [l for l in recent_lows if l == min(recent_lows)]
-    if len(troughs) >= 2:
-        detected_patterns.append("Double Bottom (Bullish Reversal)")
-    else:
-        detected_patterns.append("Standard S&R Channel Structure")
-        
+    detected_patterns = ["Support & Resistance Structure Confirmed"]
     return supports, resistances, liquidity_pools, trend, detected_patterns
 
 def evaluate_gatekeeper_checklist(df):
@@ -122,7 +111,7 @@ def evaluate_gatekeeper_checklist(df):
     return {
         "1. Trend Structure Confluence": bool(live_price > ema_200),
         "2. Support & Resistance Validation": True,
-        "3. RSI Momentum Check (Not Overbought/Oversold)": bool(30 < rsi < 70),
+        "3. RSI Momentum Check": bool(30 < rsi < 70),
         "4. Risk Management (RRR >= 1:3)": True,
         "5. Liquidity Pool Confirmation": True,
         "6. Binance API Feed Active": True
@@ -130,7 +119,7 @@ def evaluate_gatekeeper_checklist(df):
 
 # --- UI LAYOUT ---
 st.title("⚡ Institutional Advanced Technical Analysis Terminal")
-st.markdown("Professional Terminal with 100% Technical Auto-Analysis, S&R, Liquidity Pools, and Precise Mobile-Optimized Signals.")
+st.markdown("Professional Mobile Terminal with Locked S&R Entries and Clean Chart Visualization.")
 
 st.sidebar.header("🎛 Control & Risk Hub")
 
@@ -154,23 +143,24 @@ account_balance = st.sidebar.number_input("Account Balance ($):", value=10000.0,
 risk_percentage = st.sidebar.slider("Risk Per Trade (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
 
 st.sidebar.divider()
-st.sidebar.subheader("📈 Trade Setup Strategy")
+st.sidebar.subheader("📈 S&R Anchored Trade Setup")
 
-# Smart Technical Auto-Signal Calculations based on S&R
+# STABLE S&R ENTRY LOGIC (Fixed to exact Support/Resistance levels rather than fluctuating live price ticks)
 if supports and resistances:
     nearest_support = supports[-1]
     nearest_resistance = resistances[0]
     
-    if "BULLISH" in trend or (current_live_price - nearest_support) < (nearest_resistance - current_live_price):
-        trade_type = "LONG (Bullish Setup)"
-        entry_price = current_live_price
-        sl_price = nearest_support * 0.990 # Below support & liquidity
-        tp_price = entry_price + (abs(entry_price - sl_price) * 3) # 1:3 RRR
+    # If price is closer to support, set Entry precisely at Support for a LONG trade
+    if abs(current_live_price - nearest_support) <= abs(nearest_resistance - current_live_price):
+        trade_type = "LONG (Support Bounce)"
+        entry_price = nearest_support  # Locked to Support level
+        sl_price = nearest_support * 0.990  # Below support liquidity
+        tp_price = entry_price + (abs(entry_price - sl_price) * 3)  # 1:3 RRR
     else:
-        trade_type = "SHORT (Bearish Setup)"
-        entry_price = current_live_price
-        sl_price = nearest_resistance * 1.010 # Above resistance & liquidity
-        tp_price = entry_price - (abs(sl_price - entry_price) * 3) # 1:3 RRR
+        trade_type = "SHORT (Resistance Rejection)"
+        entry_price = nearest_resistance  # Locked to Resistance level
+        sl_price = nearest_resistance * 1.010  # Above resistance liquidity
+        tp_price = entry_price - (abs(sl_price - entry_price) * 3)  # 1:3 RRR
 else:
     trade_type = "LONG (Bullish Setup)"
     entry_price = current_live_price
@@ -197,12 +187,6 @@ for step, passed in checklist_status.items():
         st.sidebar.error(f"❌ {step}")
         all_passed = False
 
-st.sidebar.divider()
-if all_passed:
-    st.sidebar.markdown("### 🟢 STATUS: HIGH ACCURACY SETUP")
-else:
-    st.sidebar.markdown("### 🔴 STATUS: CAUTION")
-
 # --- MAIN DASHBOARD AREA ---
 col1, col2 = st.columns([3, 1])
 
@@ -220,11 +204,11 @@ with col1:
         rep_col1, rep_col2, rep_col3 = st.columns(3)
         rep_col1.metric("RSI Momentum (14)", f"{current_rsi:.2f}", "Neutral" if 30 <= current_rsi <= 70 else "Extreme")
         rep_col2.metric("Trend Structure", trend)
-        rep_col3.metric("Pattern Detected", patterns[0] if patterns else "None")
+        rep_col3.metric("Strategy Focus", trade_type)
         
         st.subheader(f"📊 Chart: {selected_coin} [{timeframe}] | Live Price: ${live_price:,.4f}")
         
-        # --- PLOTLY CHART WITH COMPLETE MARKINGS ---
+        # --- CLEAN MOBILE-OPTIMIZED PLOTLY CHART ---
         fig = go.Figure(data=[go.Candlestick(
             x=df['timestamp'],
             open=df['open'], high=df['high'], low=df['low'], close=df['close'],
@@ -236,25 +220,25 @@ with col1:
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#29B6F6', width=1)))
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=1.2)))
         
-        # Mark Support Lines
+        # Support Lines
         for sup in supports:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=1.2, dash="dot"))
-            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/6)], y=sup, text=f"Support: ${sup:,.2f}", showarrow=False, yshift=-8, font=dict(color="#00C853", size=9))
+            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/5)], y=sup, text=f"Support: ${sup:,.2f}", showarrow=False, yshift=-8, font=dict(color="#00C853", size=9))
 
-        # Mark Resistance Lines
+        # Resistance Lines
         for res in resistances:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=1.2, dash="dot"))
-            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/6)], y=res, text=f"Resistance: ${res:,.2f}", showarrow=False, yshift=10, font=dict(color="#D50000", size=9))
+            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/5)], y=res, text=f"Resistance: ${res:,.2f}", showarrow=False, yshift=10, font=dict(color="#D50000", size=9))
 
-        # Mark Liquidity Zones
+        # Liquidity Zones
         if liquidity_pools:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=liquidity_pools['buy_side'], y1=liquidity_pools['buy_side'], line=dict(color="#FFD700", width=1, dash="dashdot"))
-            fig.add_annotation(x=df['timestamp'].iloc[-5], y=liquidity_pools['buy_side'], text="⚡ Buy-Side Liquidity", showarrow=False, yshift=12, font=dict(color="#FFD700", size=9))
+            fig.add_annotation(x=df['timestamp'].iloc[-5], y=liquidity_pools['buy_side'], text="⚡ Buy Liquidity", showarrow=False, yshift=12, font=dict(color="#FFD700", size=9))
 
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=liquidity_pools['sell_side'], y1=liquidity_pools['sell_side'], line=dict(color="#FFD700", width=1, dash="dashdot"))
-            fig.add_annotation(x=df['timestamp'].iloc[-5], y=liquidity_pools['sell_side'], text="⚡ Sell-Side Liquidity", showarrow=False, yshift=-12, font=dict(color="#FFD700", size=9))
+            fig.add_annotation(x=df['timestamp'].iloc[-5], y=liquidity_pools['sell_side'], text="⚡ Sell Liquidity", showarrow=False, yshift=-12, font=dict(color="#FFD700", size=9))
 
-        # Mark Entry, SL, TP Setup
+        # Entry, SL, TP Lines (Anchored securely to S&R levels)
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=entry_price, y1=entry_price, line=dict(color="#29B6F6", width=1.5, dash="dash"))
         fig.add_annotation(x=df['timestamp'].iloc[-1], y=entry_price, text=f"ENTRY: ${entry_price:,.2f}", showarrow=True, arrowhead=2, ax=30, ay=0, bgcolor="#29B6F6", font=dict(color="black", size=9))
 
@@ -264,20 +248,20 @@ with col1:
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_price, y1=tp_price, line=dict(color="#00E676", width=1.5, dash="dash"))
         fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_price, text=f"TP: ${tp_price:,.2f}", showarrow=True, arrowhead=2, ax=30, ay=-12, bgcolor="#00E676", font=dict(color="black", size=9))
 
-        # Mobile Optimized Layout
+        # Optimized Layout for Phone Screens (Clean vertical spacing and candle aspect ratio)
         fig.update_layout(
-            height=480,
+            height=500,
             template="plotly_dark",
             paper_bgcolor="#0E1117",
             plot_bgcolor="#0E1117",
             xaxis_rangeslider_visible=False,
-            margin=dict(l=5, r=60, t=10, b=10),
+            margin=dict(l=5, r=65, t=10, b=10),
             yaxis=dict(title="Price (USDT)", gridcolor="#222222"),
             xaxis=dict(gridcolor="#222222")
         )
         
         st.plotly_chart(fig, use_container_width=True)
-        st.success(f"📌 **Technical Strategy:** {trade_type} | **RRR:** 1:{rrr:.2f} | **Units:** {position_size_units:,.2f}")
+        st.success(f"📌 **Stable Setup:** {trade_type} | **Entry Level:** `${entry_price:,.2f}` | **RRR:** `1:{rrr:.2f}`")
     else:
         st.warning("Fetching market data...")
 
@@ -285,7 +269,6 @@ with col2:
     st.subheader("📌 Binance Metrics")
     st.metric(label="Live Market Price", value=f"${live_price:,.4f}" if not df.empty else "N/A")
     st.metric(label="Market Trend", value=trend)
-    st.metric(label="Funding Rate", value="0.0100%", delta="Normal")
     st.metric(label="Liquidation Risk", value="Low", delta_color="inverse")
     
     st.divider()
@@ -298,4 +281,4 @@ with col2:
     st.markdown(f"- **Target RRR:** `1:{rrr:.2f}`")
     
     st.divider()
-    st.info("💡 **100% Technical Accuracy:** Support, Resistance, Liquidity pools, Trend direction, and Pattern analysis are fully automated and plotted directly onto the chart.")
+    st.info("💡 **Clean Mobile Design:** Candles are properly proportioned, and entries are firmly locked to key Support & Resistance levels to prevent random fluctuations.")
