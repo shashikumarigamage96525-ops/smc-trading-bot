@@ -15,60 +15,40 @@ st.set_page_config(
 # Auto-refresh every 10 seconds for live feeds
 count = st_autorefresh(interval=10000, limit=None)
 
-# Custom CSS for Professional Dark Theme & Clean UI Elements
+# Custom CSS for Professional Dark Theme
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
     .stSidebar { background-color: #161b22; }
     h1, h2, h3 { color: #f0f6fc !important; }
-    .metric-card { background: #21262d; padding: 15px; border-radius: 8px; border: 1px solid #30363d; }
     </style>
 """, unsafe_allow_html=True)
 
-# 1. Comprehensive Searchable Coin List (CoinGecko mapping for zero errors)
+# 1. Direct Binance Symbols List (Zero Error & Fast)
 @st.cache_data(ttl=3600)
-def get_supported_coins():
-    return {
-        "BTC/USDT": "bitcoin",
-        "ETH/USDT": "ethereum",
-        "SOL/USDT": "solana",
-        "BNB/USDT": "binancecoin",
-        "XRP/USDT": "ripple",
-        "ADA/USDT": "cardano",
-        "DOGE/USDT": "dogecoin",
-        "SUI/USDT": "sui",
-        "PEPE/USDT": "pepe",
-        "AVAX/USDT": "avalanche-2",
-        "LINK/USDT": "chainlink",
-        "NEAR/USDT": "near",
-        "MATIC/USDT": "polygon-ecosystem-token",
-        "DOT/USDT": "polkadot",
-        "SHIB/USDT": "shiba-inu",
-        "UNI/USDT": "uniswap",
-        "APT/USDT": "aptos",
-        "RENDER/USDT": "render-token",
-        "FET/USDT": "fetch-ai",
-        "INJ/USDT": "injective-protocol",
-        "AR/USDT": "arweave",
-        "OP/USDT": "optimism",
-        "ARB/USDT": "arbitrum",
-        "FTM/USDT": "fantom",
-        "ICP/USDT": "internet-computer"
-    }
+def get_binance_symbols():
+    return [
+        "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", 
+        "ADAUSDT", "DOGEUSDT", "SUIUSDT", "PEPEUSDT", "AVAXUSDT", 
+        "LINKUSDT", "NEARUSDT", "MATICUSDT", "DOTUSDT", "SHIBUSDT", 
+        "UNIUSDT", "APTUSDT", "RENDERUSDT", "FETUSDT", "INJUSDT"
+    ]
 
-# 2. Fast & Resilient Data Fetcher
-def fetch_chart_data(coin_id, timeframe):
-    days = "1" if timeframe in ["15m", "1h"] else "30"
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc?vs_currency=usd&days={days}"
-    
+# 2. Ultra-Fast Direct Binance Kline Fetcher (No IP blocks)
+def fetch_binance_data(symbol, timeframe):
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={timeframe}&limit=100"
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
             if isinstance(data, list) and len(data) > 0:
-                df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close'])
+                df = pd.DataFrame(data, columns=[
+                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                    'close_time', 'quote_asset_volume', 'number_of_trades',
+                    'taker_buy_base', 'taker_buy_quote', 'ignore'
+                ])
                 df['ts'] = pd.to_datetime(df['timestamp'], unit='ms')
-                for col in ['open', 'high', 'low', 'close']:
+                for col in ['open', 'high', 'low', 'close', 'volume']:
                     df[col] = df[col].astype(float)
                 return df
     except:
@@ -77,11 +57,10 @@ def fetch_chart_data(coin_id, timeframe):
 
 # --- SIDEBAR: SEARCH & CONTROLS ---
 st.sidebar.markdown("## 🎛 Institutional Hub")
-coins_dict = get_supported_coins()
-coin_names = list(coins_dict.keys())
+all_symbols = get_binance_symbols()
 
-default_idx = coin_names.index("BTC/USDT") if "BTC/USDT" in coin_names else 0
-selected_pair = st.sidebar.selectbox("🔍 Search & Select Coin:", coin_names, index=default_idx)
+default_idx = all_symbols.index("BTCUSDT") if "BTCUSDT" in all_symbols else 0
+selected_symbol = st.sidebar.selectbox("🔍 Search & Select Coin:", all_symbols, index=default_idx)
 tf = st.sidebar.selectbox("Primary Timeframe:", ["15m", "1h", "4h", "1d"], index=1)
 
 # MTF Confluence Settings in Sidebar
@@ -90,8 +69,7 @@ st.sidebar.markdown("### ⏳ Multi-Timeframe Matrix")
 mtf_check = st.sidebar.checkbox("Enable MTF Confluence Check", value=True)
 
 # Fetch Data
-coin_id = coins_dict[selected_pair]
-df = fetch_chart_data(coin_id, tf)
+df = fetch_binance_data(selected_symbol, tf)
 
 if not df.empty:
     price = df['close'].iloc[-1]
@@ -112,7 +90,7 @@ if not df.empty:
     
     # --- MAIN UI TITLE & METRICS HEADER ---
     st.markdown(f"# ⚡ Smart Money Concept (SMC) Terminal")
-    st.markdown(f"### Live Asset: `{selected_pair}` | Timeframe: `{tf}`")
+    st.markdown(f"### Live Asset: `{selected_symbol[:-4]}/USDT` | Timeframe: `{tf}`")
     
     # --- PLOTLY CHART WITH ALL MARKINGS (Entry, SL, TP, BSL, SSL) ---
     fig = go.Figure(data=[go.Candlestick(
@@ -180,6 +158,6 @@ if not df.empty:
     c2.success("✅ Multi-Timeframe Bias Aligned")
     
     st.sidebar.markdown("---")
-    st.sidebar.success(f"💡 **Status:** `{selected_pair}` loaded successfully with full SMC suite.")
+    st.sidebar.success(f"💡 **Status:** `{selected_symbol[:-4]}/USDT` loaded successfully via Binance Direct Feed.")
 else:
-    st.warning(f"⚠️ Could not load data for {selected_pair}. Please select another coin from the sidebar.")
+    st.warning(f"⚠️ Network delay loading {selected_symbol}. Please select another coin from the sidebar.")
