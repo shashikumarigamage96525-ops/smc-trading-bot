@@ -1,6 +1,1 @@
-streamlit
-pandas
-plotly
-requests
-streamlit-autorefresh
-
+streamlit, pandas, plotly, requests, streamlit-autorefresh
