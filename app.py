@@ -5,149 +5,98 @@ import requests
 import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="Professional Trading Terminal", layout="wide")
-
-# Live auto-refresh every 5 seconds for live price movement
+# Page Config
+st.set_page_config(page_title="Pro Trading Terminal", layout="wide")
 st_autorefresh(interval=5000, limit=None, key="live_counter")
 
-st.title("⚡ Professional Trading Terminal (Live & Interactive)")
+st.title("⚡ Professional Trading & Pattern Analysis Terminal")
 
-# 1. Robust Data Fetcher with Binance Live & Fallback Support
+# 1. Robust Data Fetcher
 @st.cache_data(ttl=10)
 def fetch_live_data(symbol):
     try:
         clean_symbol = symbol.replace("/", "")
         url = f"https://api.binance.com/api/v3/klines?symbol={clean_symbol}&interval=1h&limit=200"
-        response = requests.get(url, timeout=4)
+        response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
             df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'a', 'b', 'c', 'd', 'e', 'f'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             for col in ['open', 'high', 'low', 'close', 'volume']:
                 df[col] = df[col].astype(float)
-        else:
-            raise Exception("API Blocked")
+        else: raise Exception
     except:
-        # Fallback Live-like Simulation Data to keep terminal running smoothly
-        np.random.seed(int(pd.Timestamp.now().timestamp()) % 100)
         dates = pd.date_range(end=pd.Timestamp.now(), periods=200, freq='h')
-        base_price = 65000.0 if "BTC" in symbol else (3500.0 if "ETH" in symbol else 0.50)
-        walk = np.random.normal(loc=0, scale=base_price*0.003, size=200).cumsum()
-        close_prices = base_price + walk
-        df = pd.DataFrame({
-            'timestamp': dates,
-            'open': close_prices * 0.999,
-            'high': close_prices * 1.004,
-            'low': close_prices * 0.996,
-            'close': close_prices,
-            'volume': np.random.randint(200, 1500, size=200)
-        })
+        base = 60000.0 if "BTC" in symbol else (3000.0 if "ETH" in symbol else 0.50)
+        df = pd.DataFrame({'timestamp': dates, 'open': base, 'high': base*1.01, 'low': base*0.99, 'close': base, 'volume': 500})
         
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
     return df
 
-# 2. Pattern & Trend Engine
+# 2. Strict Pattern Engine
 def detect_dominant_pattern(df):
+    if df.empty or len(df) < 100: return "Consolidation", None
+    
     current_price = df['close'].iloc[-1]
     ema_200 = df['EMA_200'].iloc[-1]
+    trend_desc = "Strong Bullish" if current_price > ema_200 else ("Strong Bearish" if current_price < ema_200 else "Consolidation")
     
-    trend_desc = "Strong Bearish" if current_price < ema_200 else ("Strong Bullish" if current_price > ema_200 else "Neutral")
     dominant_pattern = None
+    highs, lows = df['high'].values, df['low'].values
     
-    highs = df['high'].values
-    lows = df['low'].values
-    
-    if current_price >= ema_200 * 0.95: 
-        recent_lows = lows[-50:]
-        min_l = min(recent_lows)
-        troughs = [i for i, l in enumerate(recent_lows) if l < min_l * 1.01]
-        if len(troughs) >= 2:
-            dominant_pattern = {'name': 'Double Bottom Reversal', 'bias': 'Bullish', 'level': min_l}
-            
-    if current_price <= ema_200 * 1.05:
-        recent_highs = highs[-50:]
-        max_h = max(recent_highs)
-        peaks = [i for i, h in enumerate(recent_highs) if h > max_h * 0.99]
-        if len(peaks) >= 2:
-            dominant_pattern = {'name': 'Double Top Reversal', 'bias': 'Bearish', 'level': max_h}
-            
+    # Double Bottom
+    recent_lows = lows[-60:]
+    min_l = min(recent_lows)
+    troughs = [i for i, l in enumerate(recent_lows) if abs(l - min_l) / min_l < 0.005]
+    if len(troughs) >= 2 and (troughs[-1] - troughs[0]) >= 10:
+        dominant_pattern = {'name': 'Double Bottom', 'level': min_l, 'bias': 'Bullish'}
+        
+    # Double Top
+    recent_highs = highs[-60:]
+    max_h = max(recent_highs)
+    peaks = [i for i, h in enumerate(recent_highs) if abs(h - max_h) / max_h < 0.005]
+    if len(peaks) >= 2 and (peaks[-1] - peaks[0]) >= 10:
+        dominant_pattern = {'name': 'Double Top', 'level': max_h, 'bias': 'Bearish'}
+                
     return trend_desc, dominant_pattern
 
-# 3. Sidebar Controls & Setup
+# 3. Sidebar UI
 symbol = st.sidebar.selectbox("Select Trading Pair", ["BTC/USDT", "ETH/USDT", "ADA/USDT"], index=0)
 df = fetch_live_data(symbol)
-
 current_price = df['close'].iloc[-1]
 
-st.sidebar.divider()
-st.sidebar.subheader("💰 Account & Position Sizing")
-account_balance = st.sidebar.number_input("Account Balance ($):", value=10000.0, step=500.0)
-risk_percentage = st.sidebar.slider("Risk Per Trade (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
+st.sidebar.subheader("💰 Risk Management")
+acc_bal = st.sidebar.number_input("Balance ($):", value=10000.0)
+risk_pct = st.sidebar.slider("Risk (%):", 0.5, 5.0, 1.0)
+trade_type = st.sidebar.radio("Strategy:", ["LONG", "SHORT"], horizontal=True)
 
-st.sidebar.divider()
-st.sidebar.subheader("📈 Trade Setup Configuration")
-trade_type = st.sidebar.radio("Direction Strategy:", ["LONG (Bullish)", "SHORT (Bearish)"], horizontal=True)
+entry = st.sidebar.number_input("Entry:", value=float(current_price), format="%.4f")
+sl = st.sidebar.number_input("SL:", value=float(current_price*0.99 if trade_type=="LONG" else current_price*1.01), format="%.4f")
+tp = st.sidebar.number_input("TP:", value=float(current_price*1.02 if trade_type=="LONG" else current_price*0.98), format="%.4f")
 
-p_step = 0.0001 if current_price < 10 else 0.1
+size = (acc_bal * (risk_pct/100)) / abs(entry - sl) if abs(entry - sl) > 0 else 0
 
-def_sl = current_price * 0.99 if "LONG" in trade_type else current_price * 1.01
-def_tp = current_price * 1.02 if "LONG" in trade_type else current_price * 0.98
-
-entry_price = st.sidebar.number_input("Entry Price:", value=float(current_price), format="%.4f", step=p_step)
-sl_price = st.sidebar.number_input("Stop Loss (SL):", value=float(def_sl), format="%.4f", step=p_step)
-tp_price = st.sidebar.number_input("Take Profit (TP):", value=float(def_tp), format="%.4f", step=p_step)
-
-risk_amount_usd = account_balance * (risk_percentage / 100.0)
-price_risk_per_unit = abs(entry_price - sl_price)
-position_size_units = risk_amount_usd / price_risk_per_unit if price_risk_per_unit > 0 else 0
-
-st.sidebar.info(f"💡 **Position Sizing:** Risk: **${risk_amount_usd:.2f}** | Size: **{position_size_units:,.2f} units**")
-
-# 4. Dashboard & Chart Rendering
-trend_desc, pattern = detect_dominant_pattern(df)
+# 4. Main Layout
+trend, pattern = detect_dominant_pattern(df)
 col1, col2 = st.columns([3, 1])
 
 with col1:
-    st.write(f"### Live Chart Terminal: {symbol}")
-    pattern_name = pattern['name'] if pattern else 'No Clear Pattern'
-    st.info(f"📊 **Trend Structure:** {trend_desc} | **Pattern:** {pattern_name} | **Live Price:** `${current_price:,.4f}`")
-
-    fig = go.Figure(data=[go.Candlestick(
-        x=df['timestamp'], open=df['open'], high=df['high'], low=df['low'], close=df['close'],
-        increasing_line_color='#26a69a', decreasing_line_color='#ef5350', name='Candles'
-    )])
-
-    fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], name='EMA 50', line=dict(color='#2196f3', width=1.5)))
-    fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], name='EMA 200', line=dict(color='#ff9800', width=1.5)))
-
-    # --- ENTRY, SL, TP LINES ON CHART ---
-    fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=entry_price, y1=entry_price,
-                line=dict(color="#2196f3", width=2, dash="dot"))
-    fig.add_annotation(x=df['timestamp'].iloc[-1], y=entry_price, text=f"ENTRY: {entry_price}", showarrow=True, arrowhead=1, ax=-40, ay=0, bgcolor="#2196f3", font=dict(color="white"))
-
-    fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price,
-                line=dict(color="#f44336", width=2, dash="dash"))
-    fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text=f"SL: {sl_price}", showarrow=True, arrowhead=1, ax=-40, ay=15, bgcolor="#f44336", font=dict(color="white"))
-
-    fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_price, y1=tp_price,
-                line=dict(color="#4caf50", width=2, dash="dash"))
-    fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_price, text=f"TP: {tp_price}", showarrow=True, arrowhead=1, ax=-40, ay=-15, bgcolor="#4caf50", font=dict(color="white"))
-
-    fig.update_layout(
-        height=600,
-        template="plotly_dark",
-        xaxis_rangeslider_visible=False,
-        margin=dict(l=10, r=10, t=10, b=10)
-    )
+    st.info(f"📊 **Trend:** {trend} | **Pattern:** {pattern['name'] if pattern else 'None'}")
+    fig = go.Figure(data=[go.Candlestick(x=df['timestamp'], open=df['open'], high=df['high'], low=df['low'], close=df['close'])])
+    
+    # Add Markers
+    for price, color, text in [(entry, "#2196f3", "ENTRY"), (sl, "#f44336", "SL"), (tp, "#4caf50", "TP")]:
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=price, y1=price, line=dict(color=color, width=2, dash="dash"))
+        fig.add_annotation(x=df['timestamp'].iloc[-1], y=price, text=f"{text}: {price}", bgcolor=color, font=dict(color="white"))
+    
+    fig.update_layout(height=500, template="plotly_dark", xaxis_rangeslider_visible=False)
     st.plotly_chart(fig, use_container_width=True)
 
 with col2:
-    st.subheader("📌 Trade Metrics")
-    st.metric(label="Live Market Price", value=f"${current_price:,.4f}")
-    st.metric(label="Account Risk ($)", value=f"${risk_amount_usd:,.2f}")
-    st.metric(label="Calculated Units", value=f"{position_size_units:,.2f}")
-    
-    rrr = abs(tp_price - entry_price) / abs(entry_price - sl_price) if abs(entry_price - sl_price) > 0 else 0
-    st.divider()
-    st.success(f"📌 **Strategy:** {trade_type}\n\n🎯 **RRR Ratio:** 1:{rrr:.2f}")
+    st.subheader("Metrics")
+    st.metric("Price", f"${current_price:,.2f}")
+    st.metric("Size (Units)", f"{size:,.2f}")
+    if pattern:
+        if pattern['bias'] == 'Bullish': st.success(f"✅ {pattern['name']} detected")
+        else: st.error(f"⚠️ {pattern['name']} detected")
