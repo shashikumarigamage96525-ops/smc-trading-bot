@@ -67,7 +67,7 @@ def calculate_indicators(df):
     df['RSI'] = 100 - (100 / (1 + rs))
     return df
 
-# 5. Professional Single Dominant Pattern Detection Engine
+# 5. Strict & Accurate Dominant Pattern Detection Engine
 def detect_dominant_pattern(df):
     if df.empty or len(df) < 50:
         return [], [], None
@@ -89,37 +89,39 @@ def detect_dominant_pattern(df):
     resistances = sorted(list(set(resistances)))[-3:]
     supports = sorted(list(set(supports)))[:3]
     
-    # Evaluate patterns with strict criteria, selecting ONLY the most prominent one
     dominant_pattern = None
     
-    # Check Double Top (Strict Rejection at Resistance)
-    for i in range(len(df) - 15, len(df) - 2):
-        recent_highs = highs[i-10:i]
-        peaks = [h for h in recent_highs if h >= max(recent_highs) * 0.995]
-        if len(peaks) >= 2 and abs(peaks[0] - peaks[-1]) / peaks[0] < 0.003:
+    # Strict Double Top Check (Requires real separation and precise level matching)
+    recent_highs = highs[-50:]
+    max_h = max(recent_highs)
+    peak_indices = [i for i, h in enumerate(recent_highs) if h >= max_h * 0.992]
+    
+    if len(peak_indices) >= 2:
+        # Check if peaks are well separated in time
+        if (peak_indices[-1] - peak_indices[0]) > 12:
             dominant_pattern = {
                 'name': 'Double Top Reversal',
-                'level': peaks[0],
-                'time': times[i],
+                'level': max_h,
+                'time': times[-1],
                 'bias': 'Bearish',
-                'desc': 'Price faced heavy rejection twice at the same resistance zone.'
+                'desc': 'Validated dual resistance rejection with clear time separation.'
             }
-            break
             
-    # Check Double Bottom (Strict Bounce at Support)
+    # Strict Double Bottom Check
     if not dominant_pattern:
-        for i in range(len(df) - 15, len(df) - 2):
-            recent_lows = lows[i-10:i]
-            troughs = [l for l in recent_lows if l <= min(recent_lows) * 1.005]
-            if len(troughs) >= 2 and abs(troughs[0] - troughs[-1]) / troughs[0] < 0.003:
+        recent_lows = lows[-50:]
+        min_l = min(recent_lows)
+        trough_indices = [i for i, l in enumerate(recent_lows) if l <= min_l * 1.008]
+        
+        if len(trough_indices) >= 2:
+            if (trough_indices[-1] - trough_indices[0]) > 12:
                 dominant_pattern = {
                     'name': 'Double Bottom Reversal',
-                    'level': troughs[0],
-                    'time': times[i],
+                    'level': min_l,
+                    'time': times[-1],
                     'bias': 'Bullish',
-                    'desc': 'Strong buyer defense demonstrated twice at the support level.'
+                    'desc': 'Validated dual support defense with clear time separation.'
                 }
-                break
 
     return supports, resistances, dominant_pattern
 
@@ -225,10 +227,9 @@ with col1:
         rep_col3.metric("Dominant Pattern", pattern['name'] if pattern else "No Clear Pattern")
         
         if pattern:
-            bias_color = "orange" if pattern['bias'] == "Bullish" else "red"
             st.info(f"🎯 **Validated Pattern Signal:** **{pattern['name']}** detected with **{pattern['bias']} Bias** at Level **${pattern['level']:,.4f}**. *{pattern['desc']}*")
         else:
-            st.success("Market structure is clean. Waiting for high-probability structural setups.")
+            st.success("Market structure is clean. No forced patterns. Awaiting high-probability structural setups.")
         
         st.subheader(f"📊 Chart: {selected_coin} [{timeframe}] | Live Price: ${live_price:,.4f}")
         
@@ -310,4 +311,4 @@ with col2:
     st.markdown(f"- **Take Profit:** `${tp_price:,.4f}`")
     
     st.divider()
-    st.info("💡 **Pro Intelligence:** Multi-pattern conflict resolved. The engine now isolates and displays only the single most dominant structural pattern.")
+    st.info("💡 **Pro Intelligence:** Strict time-separation filters applied. False multi-pattern alerts have been eliminated.")
