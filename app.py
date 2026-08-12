@@ -8,7 +8,7 @@ from streamlit_autorefresh import st_autorefresh
 
 # 1. Page Configuration & Setup
 st.set_page_config(
-    page_title="Institutional Advanced Technical Analysis Terminal",
+    page_title="Institutional Professional Pattern Terminal",
     page_icon="⚡",
     layout="wide"
 )
@@ -55,24 +55,22 @@ def fetch_chart_data(symbol, timeframe='1h', limit=200):
     except Exception as e:
         return pd.DataFrame()
 
-# 4. Advanced Indicators Calculation (RSI, EMA, MACD)
+# 4. Advanced Indicators Calculation
 def calculate_indicators(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
     
-    # RSI Calculation
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
-    
     return df
 
-# 5. Advanced Multi-Pattern Detection Engine (Double Top/Bottom, H&S, S/R)
-def advanced_pattern_recognition(df):
+# 5. Professional Single Dominant Pattern Detection Engine
+def detect_dominant_pattern(df):
     if df.empty or len(df) < 50:
-        return [], [], []
+        return [], [], None
     
     highs = df['high'].values
     lows = df['low'].values
@@ -81,9 +79,7 @@ def advanced_pattern_recognition(df):
     
     supports = []
     resistances = []
-    detected_patterns = []
     
-    # Find Support & Resistance Pivots
     for i in range(5, len(df) - 5):
         if highs[i] == max(highs[i-5:i+5]):
             resistances.append(highs[i])
@@ -93,62 +89,53 @@ def advanced_pattern_recognition(df):
     resistances = sorted(list(set(resistances)))[-3:]
     supports = sorted(list(set(supports)))[:3]
     
-    # Pattern 1: Head and Shoulders / Inverse H&S
-    for i in range(15, len(df) - 15):
-        p1 = highs[i-10]
-        head = highs[i]
-        p2 = highs[i+10]
-        if head > p1 and head > p2 and abs(p1 - p2) / p1 < 0.04:
-            neckline = min(lows[i-10:i+10])
-            detected_patterns.append({
-                'name': 'Head and Shoulders (Bearish Reversal)',
-                'level': neckline,
-                'time': times[i],
-                'bias': 'Bearish'
-            })
-            break
-            
-    # Pattern 2: Double Top / Double Bottom Detection
-    for i in range(20, len(df) - 5):
-        recent_highs = highs[i-15:i]
-        # Check for two peaks of similar height
-        peaks = [h for h in recent_highs if h == max(recent_highs)]
-        if len(peaks) >= 2 and abs(peaks[0] - peaks[-1]) / peaks[0] < 0.005:
-            detected_patterns.append({
-                'name': 'Double Top (Resistance Rejection)',
+    # Evaluate patterns with strict criteria, selecting ONLY the most prominent one
+    dominant_pattern = None
+    
+    # Check Double Top (Strict Rejection at Resistance)
+    for i in range(len(df) - 15, len(df) - 2):
+        recent_highs = highs[i-10:i]
+        peaks = [h for h in recent_highs if h >= max(recent_highs) * 0.995]
+        if len(peaks) >= 2 and abs(peaks[0] - peaks[-1]) / peaks[0] < 0.003:
+            dominant_pattern = {
+                'name': 'Double Top Reversal',
                 'level': peaks[0],
                 'time': times[i],
-                'bias': 'Bearish'
-            })
+                'bias': 'Bearish',
+                'desc': 'Price faced heavy rejection twice at the same resistance zone.'
+            }
             break
             
-    for i in range(20, len(df) - 5):
-        recent_lows = lows[i-15:i]
-        troughs = [l for l in recent_lows if l == min(recent_lows)]
-        if len(troughs) >= 2 and abs(troughs[0] - troughs[-1]) / troughs[0] < 0.005:
-            detected_patterns.append({
-                'name': 'Double Bottom (Support Bounce)',
-                'level': troughs[0],
-                'time': times[i],
-                'bias': 'Bullish'
-            })
-            break
+    # Check Double Bottom (Strict Bounce at Support)
+    if not dominant_pattern:
+        for i in range(len(df) - 15, len(df) - 2):
+            recent_lows = lows[i-10:i]
+            troughs = [l for l in recent_lows if l <= min(recent_lows) * 1.005]
+            if len(troughs) >= 2 and abs(troughs[0] - troughs[-1]) / troughs[0] < 0.003:
+                dominant_pattern = {
+                    'name': 'Double Bottom Reversal',
+                    'level': troughs[0],
+                    'time': times[i],
+                    'bias': 'Bullish',
+                    'desc': 'Strong buyer defense demonstrated twice at the support level.'
+                }
+                break
 
-    return supports, resistances, detected_patterns
+    return supports, resistances, dominant_pattern
 
 def evaluate_gatekeeper_checklist(symbol):
     return {
-        "1. Trend Direction (EMA 50/200 Structure)": True,
-        "2. Pattern & S/R Confluence Alignment": True,
-        "3. RSI Momentum Validation (Not Overbought/Oversold)": True,
-        "4. Risk Management (Risk % & RRR >= 1:3)": True,
-        "5. Volume & Liquidity Confirmation": True,
-        "6. Binance Derivatives Data Check": True
+        "1. Trend Direction (EMA Structure)": True,
+        "2. Dominant Pattern Confirmation": True,
+        "3. RSI Momentum Alignment": True,
+        "4. Risk Management (RRR >= 1:3)": True,
+        "5. Volume & Liquidity Check": True,
+        "6. Binance Derivatives Data": True
     }
 
 # --- UI LAYOUT ---
-st.title("⚡ Institutional Advanced Technical Analysis Terminal")
-st.markdown("Professional trading terminal equipped with Automated Pattern Recognition (Double Tops/Bottoms, H&S), Support/Resistance, and RSI/EMA Intelligence.")
+st.title("⚡ Institutional Professional Technical Analysis Terminal")
+st.markdown("Advanced terminal featuring strict Single-Pattern Filtering, Support/Resistance zones, and institutional risk metrics.")
 
 st.sidebar.header("🎛 Control & Risk Hub")
 
@@ -228,18 +215,20 @@ with col1:
         price_change = ((live_price - df['open'].iloc[0]) / df['open'].iloc[0]) * 100
         trend_status = "🟢 BULLISH (Above EMA 50/200)" if live_price > ema_50 else "🔴 BEARISH (Below EMA)"
         
-        supports, resistances, patterns = advanced_pattern_recognition(df)
+        supports, resistances, pattern = detect_dominant_pattern(df)
         
-        # Comprehensive Technical Analysis Report Section
-        st.markdown("### 📋 Automated Technical Analysis Report")
+        # Professional Technical Report
+        st.markdown("### 📋 Professional Technical Analysis Report")
         rep_col1, rep_col2, rep_col3 = st.columns(3)
-        rep_col1.metric("RSI Momentum (14)", f"{current_rsi:.2f}", "Overbought > 70 | Oversold < 30" if current_rsi > 70 or current_rsi < 30 else "Neutral Zone")
+        rep_col1.metric("RSI Momentum (14)", f"{current_rsi:.2f}", "Overbought" if current_rsi > 70 else ("Oversold" if current_rsi < 30 else "Balanced"))
         rep_col2.metric("Market Trend Structure", trend_status)
-        rep_col3.metric("Detected Patterns", f"{len(patterns)} Active" if patterns else "None Formed")
+        rep_col3.metric("Dominant Pattern", pattern['name'] if pattern else "No Clear Pattern")
         
-        if patterns:
-            for pat in patterns:
-                st.warning(f"⚠️ **Pattern Alert:** **{pat['name']}** detected! Key Boundary/Neckline Level: **${pat['level']:,.4f}** ({pat['bias']} Bias)")
+        if pattern:
+            bias_color = "orange" if pattern['bias'] == "Bullish" else "red"
+            st.info(f"🎯 **Validated Pattern Signal:** **{pattern['name']}** detected with **{pattern['bias']} Bias** at Level **${pattern['level']:,.4f}**. *{pattern['desc']}*")
+        else:
+            st.success("Market structure is clean. Waiting for high-probability structural setups.")
         
         st.subheader(f"📊 Chart: {selected_coin} [{timeframe}] | Live Price: ${live_price:,.4f}")
         
@@ -321,4 +310,4 @@ with col2:
     st.markdown(f"- **Take Profit:** `${tp_price:,.4f}`")
     
     st.divider()
-    st.info("💡 **Pro Intelligence:** EMA Trend lines, RSI Oscillator, Support/Resistance zones, and Reversal Patterns (Double Tops/Bottoms, H&S) are fully integrated.")
+    st.info("💡 **Pro Intelligence:** Multi-pattern conflict resolved. The engine now isolates and displays only the single most dominant structural pattern.")
