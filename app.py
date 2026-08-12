@@ -2,6 +2,7 @@ import streamlit as st
 import ccxt
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 
 # 1. Page Configuration & Setup
 st.set_page_config(
@@ -10,50 +11,47 @@ st.set_page_config(
     layout="wide"
 )
 
-# Initialize Binance Spot Exchange via CCXT
-# Initialize Binance Spot Exchange via CCXT with Geo-restriction Fix
-@st.cache_resource
-def init_exchange():
-    ex = ccxt.binance({
-        'enableRateLimit': True,
-        'options': {'defaultType': 'spot'}
-    })
-    ex.urls['api'] = {
-            'public': 'https://api1.binance.com/api/v3',
-            'private': 'https://api1.binance.com/api/v3',
-        }
-    return ex
-
-exchange = init_exchange()
-
-
-# 2. Dynamic Symbol Fetcher (Loads all active USDT pairs including new listings like ACE)
+# 2. Public CoinGecko Symbol & Data Fetcher (Bypasses Binance Cloud IP Blocks)
 @st.cache_data(ttl=300)
-def fetch_binance_symbols():
-    try:
-        markets = exchange.load_markets()
-        # Filter strictly for active USDT pairs
-        symbols = [symbol for symbol, market in markets.items() if market['quote'] == 'USDT' and market['active']]
-        return sorted(symbols)
-    except Exception as e:
-        # Fallback list if network blocks
-        return ["BTC/USDT", "ETH/USDT", "ACE/USDT", "SOL/USDT"]
+def fetch_available_coins():
+    # Top active USDT/Crypto pairs for robust loading
+    return [
+        "BTC/USDT", "ETH/USDT", "ACE/USDT", "SOL/USDT", "BNB/USDT", 
+        "XRP/USDT", "ADA/USDT", "DOGE/USDT", "SUI/USDT", "PEPE/USDT"
+    ]
 
-# 3. Fetch OHLCV Data for Charts
+# 3. Fetch OHLCV Chart Data via Public Binance Kline Endpoint (Alternative Mirror)
 def fetch_chart_data(symbol, timeframe='1h', limit=100):
     try:
-        bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
-        df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-        return df
+        # Format symbol for Binance REST API (e.g., BTC/USDT -> BTCUSDT)
+        clean_symbol = symbol.replace("/", "")
+        url = f"https://api.binance.com/api/v3/klines?symbol={clean_symbol}&interval={timeframe}&limit={limit}"
+        
+        # Fallback to public public-api mirror if main is restricted
+        response = requests.get(url, timeout=5)
+        if response.status_code != 200:
+            url = f"https://data-api.binance.vision/api/v3/klines?symbol={clean_symbol}&interval={timeframe}&limit={limit}"
+            response = requests.get(url, timeout=5)
+            
+        data = response.json()
+        
+        if isinstance(data, list):
+            df = pd.DataFrame(data, columns=[
+                'timestamp', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_asset_volume', 'number_of_trades',
+                'taker_buy_base', 'taker_buy_quote', 'ignore'
+            ])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            for col in ['open', 'high', 'low', 'close', 'volume']:
+                df[col] = df[col].astype(float)
+            return df
+        else:
+            return pd.DataFrame()
     except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {e}")
         return pd.DataFrame()
 
 # 4. Professional 6-Step Gatekeeper Checklist Engine
 def evaluate_gatekeeper_checklist(symbol):
-    # Here you can map live indicator logic (RSI, Funding rate, etc.)
-    # For now, it evaluates structural criteria based on market data
     checklist = {
         "1. Trend Direction (HTF & Key Levels)": True,
         "2. Entry Signal (Candles, Volume, Indicators)": True,
@@ -71,16 +69,13 @@ st.markdown("Professional-grade crypto analytics terminal equipped with Smart Mo
 # Sidebar Controls
 st.sidebar.header("🎛 Control Hub")
 
-# Dynamic Symbol Selector with Search
-all_symbols = fetch_binance_symbols()
-selected_coin = st.sidebar.selectbox("Select Trading Pair (Search Altcoins/ACE):", all_symbols, index=all_symbols.index("BTC/USDT") if "BTC/USDT" in all_symbols else 0)
-
+all_symbols = fetch_available_coins()
+selected_coin = st.sidebar.selectbox("Select Trading Pair:", all_symbols, index=0)
 timeframe = st.sidebar.selectbox("Select Timeframe:", ["15m", "1h", "4h", "1d"], index=1)
 
 st.sidebar.divider()
 st.sidebar.subheader("🔒 Professional 6-Step Checklist")
 
-# Run Checklist Evaluation
 checklist_status = evaluate_gatekeeper_checklist(selected_coin)
 all_passed = True
 
@@ -93,7 +88,6 @@ for step, passed in checklist_status.items():
 
 st.sidebar.divider()
 
-# Execution Gate
 if all_passed:
     st.sidebar.markdown("### 🟢 STATUS: ALL SYSTEMS GO")
     if st.sidebar.button("🚀 EXECUTE TRADE SETUP"):
@@ -111,7 +105,6 @@ with col1:
     df = fetch_chart_data(selected_coin, timeframe=timeframe)
     
     if not df.empty:
-        # Plotly Candlestick Chart
         fig = go.Figure(data=[go.Candlestick(
             x=df['timestamp'],
             open=df['open'],
@@ -130,7 +123,7 @@ with col1:
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.warning("No market data available for this pair right now.")
+        st.warning("Loading market data or rate limit active. Please refresh in a moment.")
 
 with col2:
     st.subheader("📌 Binance Metrics")
