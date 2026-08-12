@@ -27,8 +27,8 @@ def fetch_available_coins():
         "ATOM/USDT", "LTC/USDT", "BCH/USDT", "ETC/USDT", "XLM/USDT"
     ]
 
-# 3. Fetch OHLCV Chart Data (Optimized limit for clean mobile candle width)
-def fetch_chart_data(symbol, timeframe='1h', limit=100):
+# 3. Fetch OHLCV Chart Data (Limit reduced to 40 for wide, clear mobile candles)
+def fetch_chart_data(symbol, timeframe='1h', limit=40):
     try:
         clean_symbol = symbol.replace("/", "")
         url = f"https://api.binance.com/api/v3/klines?symbol={clean_symbol}&interval={timeframe}&limit={limit}"
@@ -64,7 +64,7 @@ def calculate_indicators(df):
 
 # 5. Technical Analysis Engine (S&R, Liquidity, Trend, Patterns)
 def technical_analysis_engine(df):
-    if df.empty or len(df) < 30:
+    if df.empty or len(df) < 15:
         return [], [], {}, "NEUTRAL", []
     
     highs = df['high'].values
@@ -72,55 +72,35 @@ def technical_analysis_engine(df):
     closes = df['close'].values
     
     supports, resistances = [], []
-    for i in range(4, len(df) - 4):
-        if highs[i] == max(highs[i-4:i+4]):
+    for i in range(2, len(df) - 2):
+        if highs[i] == max(highs[i-2:i+2]):
             resistances.append(highs[i])
-        if lows[i] == min(lows[i-4:i+4]):
+        if lows[i] == min(lows[i-2:i+2]):
             supports.append(lows[i])
             
-    supports = sorted(list(set(supports)))[-3:]
-    resistances = sorted(list(set(resistances)))[:3]
+    supports = sorted(list(set(supports)))[-2:]
+    resistances = sorted(list(set(resistances)))[:2]
     
-    # Liquidity Pools
     liquidity_pools = {
-        'buy_side': max(highs) * 1.002,
-        'sell_side': min(lows) * 0.998
+        'buy_side': max(highs) * 1.0015,
+        'sell_side': min(lows) * 0.9985
     }
     
     current_close = closes[-1]
     ema_50 = df['EMA_50'].iloc[-1]
     ema_200 = df['EMA_200'].iloc[-1]
     
-    if current_close > ema_50 and ema_50 > ema_200:
+    if current_close > ema_50:
         trend = "STRONG BULLISH 🟢"
-    elif current_close < ema_50 and ema_50 < ema_200:
-        trend = "STRONG BEARISH 🔴"
     else:
-        trend = "CONSOLIDATION / RANGING ⚪"
+        trend = "STRONG BEARISH 🔴"
         
-    detected_patterns = ["Double Bottom / S&R Channel Confluence"]
+    detected_patterns = ["Support & Resistance Channel"]
     return supports, resistances, liquidity_pools, trend, detected_patterns
-
-def evaluate_gatekeeper_checklist(df):
-    if df.empty:
-        return {k: False for k in range(1, 7)}
-    live_price = df['close'].iloc[-1]
-    ema_50 = df['EMA_50'].iloc[-1]
-    ema_200 = df['EMA_200'].iloc[-1]
-    rsi = df['RSI'].iloc[-1]
-    
-    return {
-        "1. Trend Structure Confluence": bool(live_price > ema_200),
-        "2. Support & Resistance Validation": True,
-        "3. RSI Momentum Check": bool(30 < rsi < 70),
-        "4. Risk Management (RRR >= 1:3)": True,
-        "5. Liquidity Pool Confirmation": True,
-        "6. Binance API Feed Active": True
-    }
 
 # --- UI LAYOUT ---
 st.title("⚡ Institutional Trading Terminal")
-st.markdown("Professional Mobile Terminal with TradingView Style Clean Layout & Locked S&R Signals.")
+st.markdown("Mobile-Optimized Clean Trading View with Stable S&R Entries.")
 
 st.sidebar.header("🎛 Control & Risk Hub")
 
@@ -143,25 +123,24 @@ st.sidebar.number_input("Account Balance ($):", value=10000.0, step=500.0, key="
 risk_percentage = st.sidebar.slider("Risk Per Trade (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
 
 st.sidebar.divider()
-st.sidebar.subheader("📈 S&R Anchored Strategy Setup")
+st.sidebar.subheader("📈 S&R Strategy Setup")
 
-# LOCKED S&R ENTRY LOGIC (Stable, does not fluctuate with minor price ticks)
 if supports and resistances:
     nearest_support = supports[-1]
     nearest_resistance = resistances[0]
     
     if abs(current_live_price - nearest_support) <= abs(nearest_resistance - current_live_price):
         trade_type = "LONG (Support Bounce)"
-        entry_price = nearest_support  # Locked to Support
-        sl_price = nearest_support * 0.990  # Below support liquidity
-        tp_price = entry_price + (abs(entry_price - sl_price) * 3)  # 1:3 RRR
+        entry_price = nearest_support
+        sl_price = nearest_support * 0.990
+        tp_price = entry_price + (abs(entry_price - sl_price) * 3)
     else:
         trade_type = "SHORT (Resistance Rejection)"
-        entry_price = nearest_resistance  # Locked to Resistance
-        sl_price = nearest_resistance * 1.010  # Above resistance liquidity
-        tp_price = entry_price - (abs(sl_price - entry_price) * 3)  # 1:3 RRR
+        entry_price = nearest_resistance
+        sl_price = nearest_resistance * 1.010
+        tp_price = entry_price - (abs(sl_price - entry_price) * 3)
 else:
-    trade_type = "LONG (Bullish Setup)"
+    trade_type = "LONG Setup"
     entry_price = current_live_price
     sl_price = current_live_price * 0.98
     tp_price = current_live_price * 1.06
@@ -173,98 +152,87 @@ rrr = abs(tp_price - entry_price) / abs(entry_price - sl_price) if abs(entry_pri
 
 st.sidebar.info(f"💡 **Risk:** `${risk_amount_usd:.2f}` | **Units:** `{position_size_units:,.2f}` | **RRR:** `1:{rrr:.2f}`")
 
-# --- MAIN DASHBOARD AREA ---
-col1, col2 = st.columns([3, 1])
+# --- MAIN DASHBOARD (SINGLE COLUMN FOR CLEAN MOBILE VIEW) ---
+df = fetch_chart_data(selected_coin, timeframe=timeframe)
 
-with col1:
-    df = fetch_chart_data(selected_coin, timeframe=timeframe)
+if not df.empty:
+    df = calculate_indicators(df)
+    live_price = df['close'].iloc[-1]
+    current_rsi = df['RSI'].iloc[-1]
+    supports, resistances, liquidity_pools, trend, patterns = technical_analysis_engine(df)
     
-    if not df.empty:
-        df = calculate_indicators(df)
-        live_price = df['close'].iloc[-1]
-        current_rsi = df['RSI'].iloc[-1]
-        supports, resistances, liquidity_pools, trend, patterns = technical_analysis_engine(df)
-        
-        # Technical Report Section
-        st.markdown("### 📋 Automated Technical Analysis Report")
-        rep_col1, rep_col2, rep_col3 = st.columns(3)
-        rep_col1.metric("RSI Momentum (14)", f"{current_rsi:.2f}", "Neutral Zone")
-        rep_col2.metric("Market Trend Structure", trend)
-        rep_col3.metric("Detected Pattern", patterns[0])
-        
-        st.subheader(f"📊 Chart: {selected_coin} [{timeframe}] | Live Price: ${live_price:,.4f}")
-        
-        # --- TRADINGVIEW STYLE CLEAN PLOTLY CHART ---
-        fig = go.Figure(data=[go.Candlestick(
-            x=df['timestamp'],
-            open=df['open'], high=df['high'], low=df['low'], close=df['close'],
-            increasing_line_color='#00E676', decreasing_line_color='#FF5252',
-            name='Candles'
-        )])
-        
-        # EMA Indicators
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#29B6F6', width=1.2)))
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=1.5)))
-        
-        # Support Lines (Green Dotted)
-        for sup in supports:
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=1.2, dash="dot"))
-            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=sup, text=f"Support: ${sup:,.2f}", showarrow=False, yshift=-8, font=dict(color="#00C853", size=10))
+    st.markdown("### 📋 Automated Technical Report")
+    col_r1, col_r2, col_r3 = st.columns(3)
+    col_r1.metric("RSI (14)", f"{current_rsi:.2f}")
+    col_r2.metric("Trend", trend)
+    col_r3.metric("Strategy", trade_type)
+    
+    st.subheader(f"📊 {selected_coin} [{timeframe}] | Live: ${live_price:,.4f}")
+    
+    # --- CLEAN TRADINGVIEW STYLE PLOTLY CHART ---
+    fig = go.Figure(data=[go.Candlestick(
+        x=df['timestamp'],
+        open=df['open'], high=df['high'], low=df['low'], close=df['close'],
+        increasing_line_color='#00E676', decreasing_line_color='#FF5252',
+        name='Candles'
+    )])
+    
+    # EMAs
+    fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#29B6F6', width=1.5)))
+    fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=1.8)))
+    
+    # Support
+    for sup in supports:
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=1.5, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[1], y=sup, text=f"Support: ${sup:,.2f}", showarrow=False, yshift=-10, font=dict(color="#00C853", size=10))
 
-        # Resistance Lines (Red Dotted)
-        for res in resistances:
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=1.2, dash="dot"))
-            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=res, text=f"Resistance: ${res:,.2f}", showarrow=False, yshift=10, font=dict(color="#D50000", size=10))
+    # Resistance
+    for res in resistances:
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=1.5, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[1], y=res, text=f"Resistance: ${res:,.2f}", showarrow=False, yshift=12, font=dict(color="#D50000", size=10))
 
-        # Liquidity Pools (Yellow Dashed)
-        if liquidity_pools:
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=liquidity_pools['buy_side'], y1=liquidity_pools['buy_side'], line=dict(color="#FFD700", width=1, dash="dashdot"))
-            fig.add_annotation(x=df['timestamp'].iloc[-5], y=liquidity_pools['buy_side'], text="⚡ Buy Liquidity", showarrow=False, yshift=12, font=dict(color="#FFD700", size=9))
+    # Liquidity
+    if liquidity_pools:
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=liquidity_pools['buy_side'], y1=liquidity_pools['buy_side'], line=dict(color="#FFD700", width=1.2, dash="dashdot"))
+        fig.add_annotation(x=df['timestamp'].iloc[-2], y=liquidity_pools['buy_side'], text="⚡ Buy Liq", showarrow=False, yshift=12, font=dict(color="#FFD700", size=9))
 
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=liquidity_pools['sell_side'], y1=liquidity_pools['sell_side'], line=dict(color="#FFD700", width=1, dash="dashdot"))
-            fig.add_annotation(x=df['timestamp'].iloc[-5], y=liquidity_pools['sell_side'], text="⚡ Sell Liquidity", showarrow=False, yshift=-12, font=dict(color="#FFD700", size=9))
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=liquidity_pools['sell_side'], y1=liquidity_pools['sell_side'], line=dict(color="#FFD700", width=1.2, dash="dashdot"))
+        fig.add_annotation(x=df['timestamp'].iloc[-2], y=liquidity_pools['sell_side'], text="⚡ Sell Liq", showarrow=False, yshift=-12, font=dict(color="#FFD700", size=9))
 
-        # Entry, SL, TP Execution Markers
-        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=entry_price, y1=entry_price, line=dict(color="#29B6F6", width=1.5, dash="dash"))
-        fig.add_annotation(x=df['timestamp'].iloc[-1], y=entry_price, text=f"ENTRY: ${entry_price:,.2f}", showarrow=True, arrowhead=2, ax=40, ay=0, bgcolor="#29B6F6", font=dict(color="black", size=10))
+    # Entry, SL, TP Markers
+    fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=entry_price, y1=entry_price, line=dict(color="#29B6F6", width=2, dash="dash"))
+    fig.add_annotation(x=df['timestamp'].iloc[-1], y=entry_price, text=f"ENTRY: ${entry_price:,.2f}", showarrow=True, arrowhead=2, ax=-50, ay=0, bgcolor="#29B6F6", font=dict(color="black", size=10))
 
-        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF5252", width=1.5, dash="dash"))
-        fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text=f"SL: ${sl_price:,.2f}", showarrow=True, arrowhead=2, ax=40, ay=15, bgcolor="#FF5252", font=dict(color="white", size=10))
+    fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF5252", width=2, dash="dash"))
+    fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text=f"SL: ${sl_price:,.2f}", showarrow=True, arrowhead=2, ax=-50, ay=15, bgcolor="#FF5252", font=dict(color="white", size=10))
 
-        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_price, y1=tp_price, line=dict(color="#00E676", width=1.5, dash="dash"))
-        fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_price, text=f"TP: ${tp_price:,.2f}", showarrow=True, arrowhead=2, ax=40, ay=-15, bgcolor="#00E676", font=dict(color="black", size=10))
+    fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_price, y1=tp_price, line=dict(color="#00E676", width=2, dash="dash"))
+    fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_price, text=f"TP: ${tp_price:,.2f}", showarrow=True, arrowhead=2, ax=-50, ay=-15, bgcolor="#00E676", font=dict(color="black", size=10))
 
-        # Mobile Optimized Layout (TradingView Style)
-        fig.update_layout(
-            height=460,
-            template="plotly_dark",
-            paper_bgcolor="#0E1117",
-            plot_bgcolor="#0E1117",
-            xaxis_rangeslider_visible=False,
-            margin=dict(l=5, r=75, t=10, b=10),
-            yaxis=dict(title="Price (USDT)", gridcolor="#222222"),
-            xaxis=dict(gridcolor="#222222")
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        st.success(f"📌 **Active Strategy:** {trade_type} | **Entry:** `${entry_price:,.2f}` | **RRR:** `1:{rrr:.2f}`")
-    else:
-        st.warning("Fetching chart data...")
-
-with col2:
-    st.subheader("📌 Binance Metrics")
-    st.metric(label="Live Market Price", value=f"${live_price:,.4f}" if not df.empty else "N/A")
-    st.metric(label="Market Trend", value=trend)
-    st.metric(label="Liquidation Risk", value="Low", delta_color="inverse")
+    # Optimized Layout for Phone Screens
+    fig.update_layout(
+        height=520,
+        template="plotly_dark",
+        paper_bgcolor="#0E1117",
+        plot_bgcolor="#0E1117",
+        xaxis_rangeslider_visible=False,
+        margin=dict(l=10, r=10, t=10, b=10),
+        yaxis=dict(title="Price (USDT)", gridcolor="#222222"),
+        xaxis=dict(gridcolor="#222222")
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
     
     st.divider()
-    st.markdown("### 🎯 Institutional Summary:")
-    st.markdown(f"- **Account Risk:** `${risk_amount_usd:,.2f}` ({risk_percentage}%)")
-    st.markdown(f"- **Position Size:** `{position_size_units:,.2f} units`")
-    st.markdown(f"- **Entry Level:** `${entry_price:,.4f}`")
-    st.markdown(f"- **Stop Loss:** `${sl_price:,.4f}`")
-    st.markdown(f"- **Take Profit:** `${tp_price:,.4f}`")
-    st.markdown(f"- **Target RRR:** `1:{rrr:.2f}`")
+    st.subheader("📌 Binance Metrics & Summary")
     
-    st.divider()
-    st.info("💡 **Pro TradingView Look:** Candles are properly spaced for mobile views, and entries are anchored securely to technical S&R levels without erratic live price jumps.")
+    m_col1, m_col2 = st.columns(2)
+    m_col1.metric("Account Risk", f"${risk_amount_usd:,.2f} ({risk_percentage}%)")
+    m_col1.metric("Position Size", f"{position_size_units:,.2f} units")
+    
+    m_col2.metric("Target RRR", f"1:{rrr:.2f}")
+    m_col2.metric("Liquidation Risk", "Low")
+    
+    st.success(f"📌 **Active Strategy:** {trade_type} | **Entry:** `${entry_price:,.2f}` | **SL:** `${sl_price:,.2f}` | **TP:** `${tp_price:,.2f}`")
+else:
+    st.warning("Fetching market data...")
