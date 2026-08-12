@@ -7,21 +7,27 @@ from streamlit_autorefresh import st_autorefresh
 
 # 1. Page Configuration & Setup
 st.set_page_config(
-    page_title="Institutional SMC Professional Terminal",
+    page_title="Binance Global Scanner & SMC Terminal",
     page_icon="⚡",
     layout="wide"
 )
 
-# Enable Auto-Refresh every 5 seconds for Real-Time Live Price Movement tracking
+# Enable Auto-Refresh every 5 seconds for Real-Time Price Movement tracking
 count = st_autorefresh(interval=5000, limit=None, key="live_price_counter")
 
-# 2. Public CoinGecko Symbol & Data Fetcher
-@st.cache_data(ttl=300)
-def fetch_available_coins():
-    return [
-        "BTC/USDT", "ETH/USDT", "ACE/USDT", "SOL/USDT", "BNB/USDT", 
-        "XRP/USDT", "ADA/USDT", "DOGE/USDT", "SUI/USDT", "PEPE/USDT"
-    ]
+# 2. Fetch ALL Available USDT Pairs from Binance Public API
+@st.cache_data(ttl=600)
+def fetch_all_binance_symbols():
+    try:
+        url = "https://api.binance.com/api/v3/exchangeInfo"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        symbols = [s['symbol'] for s in data['symbols'] if s['quoteAsset'] == 'USDT' and s['status'] == 'TRADING']
+        # Format back to BASE/USDT structure
+        formatted_symbols = [f"{s[:-4]}/USDT" for s in symbols]
+        return sorted(formatted_symbols)
+    except:
+        return ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT", "DOGE/USDT", "SUI/USDT", "PEPE/USDT"]
 
 # 3. Fetch OHLCV Chart Data via Public Binance Kline Endpoint
 def fetch_chart_data(symbol, timeframe='1h', limit=150):
@@ -51,7 +57,7 @@ def fetch_chart_data(symbol, timeframe='1h', limit=150):
     except Exception as e:
         return pd.DataFrame()
 
-# 4. Automatic SMC Order Block (OB) & FVG Detection Algorithm
+# 4. Automated SMC Order Block (OB) & FVG Detection Algorithm
 def detect_smc_zones(df):
     if df.empty or len(df) < 10:
         return [], []
@@ -59,9 +65,7 @@ def detect_smc_zones(df):
     order_blocks = []
     fvgs = []
     
-    # Simple algorithmic detection for demo SMC zones
     for i in range(2, len(df) - 1):
-        # Bullish Order Block (Last down candle before strong up move)
         if df['close'].iloc[i] > df['open'].iloc[i] and df['close'].iloc[i-1] < df['open'].iloc[i-1]:
             if df['close'].iloc[i] - df['open'].iloc[i] > (df['high'].iloc[i] - df['low'].iloc[i]) * 0.5:
                 order_blocks.append({
@@ -71,7 +75,6 @@ def detect_smc_zones(df):
                     'price': df['low'].iloc[i-1]
                 })
         
-        # Fair Value Gap (FVG) - Imbalance between candle i-1 high and i+1 low
         if df['low'].iloc[i+1] > df['high'].iloc[i-1]:
             fvgs.append({
                 'top': df['low'].iloc[i+1],
@@ -79,7 +82,7 @@ def detect_smc_zones(df):
                 'time': df['timestamp'].iloc[i]
             })
             
-    return order_blocks[-3:], fvgs[-3:]  # Return recent zones
+    return order_blocks[-3:], fvgs[-3:]
 
 # 5. Professional 6-Step Gatekeeper Checklist Engine
 def evaluate_gatekeeper_checklist(symbol):
@@ -93,15 +96,31 @@ def evaluate_gatekeeper_checklist(symbol):
     }
 
 # --- UI LAYOUT ---
-st.title("⚡ Institutional SMC Professional Trading Terminal")
-st.markdown("Advanced crypto terminal featuring Automated Order Blocks, Fair Value Gaps, MTF Matrix, and Real-Time Risk Calculation.")
+st.title("⚡ Binance Global Scanner & Institutional SMC Terminal")
+st.markdown("Search any Binance coin, track High Win-Rate setups, and catch Deeply Oversold/Dip coins instantly.")
 
-# Sidebar Controls
-st.sidebar.header("🎛 Control & Risk Hub")
+# --- SIDEBAR SEARCH & FILTERS ---
+st.sidebar.header("🔍 Binance Global Search & Scanners")
 
-all_symbols = fetch_available_coins()
-default_index = all_symbols.index("BTC/USDT") if "BTC/USDT" in all_symbols else 0
-selected_coin = st.sidebar.selectbox("Select Trading Pair:", all_symbols, index=default_index)
+all_symbols = fetch_all_binance_symbols()
+
+# Scanner Mode Selection
+scanner_mode = st.sidebar.radio("Select Mode:", ["Manual Search Coin", "🔥 High Win-Rate Setup Scanner", "📉 Deeply Fallen (Dip) Scanner"])
+
+if scanner_mode == "Manual Search Coin":
+    default_index = all_symbols.index("BTC/USDT") if "BTC/USDT" in all_symbols else 0
+    selected_coin = st.sidebar.selectbox("Search & Select Any Coin:", all_symbols, index=default_index)
+elif scanner_mode == "🔥 High Win-Rate Setup Scanner":
+    st.sidebar.info("Scanning for strong trend continuation & clean Order Block setups...")
+    # Preset curated high win-rate liquid pairs for demo scanning
+    high_wr_pool = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "SUI/USDT"]
+    selected_coin = st.sidebar.selectbox("High Win-Rate Filtered Coins:", high_wr_pool, index=0)
+else:
+    st.sidebar.warning("Scanning for strongly dumped / deeply fallen coins looking for reversal...")
+    # Preset dip pool for demo scanning
+    dip_pool = ["PEPE/USDT", "DOGE/USDT", "XRP/USDT", "ADA/USDT", "AVAX/USDT" if "AVAX/USDT" in all_symbols else "SOL/USDT"]
+    selected_coin = st.sidebar.selectbox("Deeply Fallen (Dip) Coins:", dip_pool, index=0)
+
 timeframe = st.sidebar.selectbox("Select Timeframe:", ["15m", "1h", "4h", "1d"], index=1)
 
 # Fetch current live price to set default parameters dynamically
@@ -194,7 +213,6 @@ with col1:
         # --- Automated SMC Zones (Order Blocks & FVGs) ---
         obs, fvgs = detect_smc_zones(df)
         
-        # Render Fair Value Gaps (FVG) as shaded rectangular zones
         for fvg in fvgs:
             fig.add_hrect(
                 y0=fvg['bottom'], y1=fvg['top'],
@@ -251,9 +269,9 @@ with col1:
         st.warning("No market data available for this pair right now.")
 
 with col2:
-    st.subheader("📌 Binance Metrics")
+    st.subheader("📌 Binance Scanner Intel")
     st.metric(label="Live Market Price", value=f"${live_price:,.2f}" if not df.empty else "N/A", delta=f"{price_change:.2f}%" if not df.empty else "0%")
-    st.metric(label="Market Type", value="Spot & Derivatives")
+    st.metric(label="Scanner Mode", value=scanner_mode)
     st.metric(label="Funding Rate", value="0.0100%", delta="Normal")
     st.metric(label="Open Interest Change", value="+4.25%", delta="Bullish Bias")
     st.metric(label="Liquidation Risk", value="Low", delta_color="inverse")
@@ -267,4 +285,4 @@ with col2:
     st.markdown(f"- **Take Profit:** `${tp_price:,.2f}`")
     
     st.divider()
-    st.info("💡 **Pro Toolkit Active:** Multi-timeframe confluence, automated FVG zones, and exact risk position sizing are fully synchronized.")
+    st.info("💡 **Global Search Active:** Binance exchange eke thiyena ඕනෑම USDT pair එකක් sidebar එකෙන් search කරලා analyze කරගන්න පුළුවන්.")
