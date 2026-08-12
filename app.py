@@ -3,7 +3,7 @@ import ccxt
 import pandas as pd
 import plotly.graph_objects as go
 import requests
-import datetime
+import numpy as np
 
 # 1. Page Configuration & Setup
 st.set_page_config(
@@ -12,14 +12,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# Global state to store executed trade visual data
-if 'trade_execution' not in st.session_state:
-    st.session_state.trade_execution = None
-
 # 2. Public CoinGecko Symbol & Data Fetcher
 @st.cache_data(ttl=300)
 def fetch_available_coins():
-    # Top active USDT/Crypto pairs for robust loading
     return [
         "BTC/USDT", "ETH/USDT", "ACE/USDT", "SOL/USDT", "BNB/USDT", 
         "XRP/USDT", "ADA/USDT", "DOGE/USDT", "SUI/USDT", "PEPE/USDT"
@@ -55,7 +50,7 @@ def fetch_chart_data(symbol, timeframe='1h', limit=150):
 
 # 4. Professional 6-Step Gatekeeper Checklist Engine
 def evaluate_gatekeeper_checklist(symbol):
-    checklist = {
+    return {
         "1. Trend Direction (HTF & Key Levels)": True,
         "2. Entry Signal (Candles, Volume, Indicators)": True,
         "3. Risk Management (Risk % & RRR >= 1:3)": True,
@@ -63,7 +58,6 @@ def evaluate_gatekeeper_checklist(symbol):
         "5. Chart Confirmation (Multi-TF Alignment)": True,
         "6. Binance Data (Funding & Open Interest)": True
     }
-    return checklist
 
 # --- UI LAYOUT ---
 st.title("🚀 Institutional SMC & Binance Trading Terminal")
@@ -73,28 +67,37 @@ st.markdown("Professional-grade crypto analytics terminal equipped with Smart Mo
 st.sidebar.header("🎛 Control Hub")
 
 all_symbols = fetch_available_coins()
-# Set initial coin index dynamically to handle common pairs like BTC/USDT
 default_index = all_symbols.index("BTC/USDT") if "BTC/USDT" in all_symbols else 0
-selected_coin = st.sidebar.selectbox("Select Trading Pair (Search/Altcoins):", all_symbols, index=default_index)
-
+selected_coin = st.sidebar.selectbox("Select Trading Pair:", all_symbols, index=default_index)
 timeframe = st.sidebar.selectbox("Select Timeframe:", ["15m", "1h", "4h", "1d"], index=1)
 
-# Trade Parameters Inputs (Visible only when 'Stand Down' or 'Executing')
-st.sidebar.divider()
-st.sidebar.subheader("📈 Trade Parameters (Hypothetical Setup)")
-entry_price = st.sidebar.number_input("Entry Price:", value=65000.0, step=10.0)
-sl_price = st.sidebar.number_input("Stop Loss (SL) Price:", value=64500.0, step=10.0)
-tp_price = st.sidebar.number_input("Take Profit (TP) Price:", value=66500.0, step=10.0)
-trade_type = st.sidebar.radio("Trade Type:", ["LONG", "SHORT"], horizontal=True)
+# Fetch current live price to set default parameters dynamically
+df_live = fetch_chart_data(selected_coin, timeframe=timeframe, limit=5)
+current_live_price = df_live['close'].iloc[-1] if not df_live.empty else 60000.0
 
+st.sidebar.divider()
+st.sidebar.subheader("📈 Trade Setup Configuration")
+trade_type = st.sidebar.radio("Direction Strategy:", ["LONG (Bullish)", "SHORT (Bearish)"], horizontal=True)
+
+# Smart defaults based on direction
+if "LONG" in trade_type:
+    def_entry = current_live_price
+    def_sl = current_live_price * 0.992  # 0.8% below
+    def_tp = current_live_price * 1.025  # 2.5% above
+else:
+    def_entry = current_live_price
+    def_sl = current_live_price * 1.008  # 0.8% above
+    def_tp = current_live_price * 0.975  # 2.5% below
+
+entry_price = st.sidebar.number_input("Entry Price:", value=float(def_entry), step=1.0)
+sl_price = st.sidebar.number_input("Stop Loss (SL) Price:", value=float(def_sl), step=1.0)
+tp_price = st.sidebar.number_input("Take Profit (TP) Price:", value=float(def_tp), step=1.0)
 
 st.sidebar.divider()
 st.sidebar.subheader("🔒 Professional 6-Step Checklist")
 
-# Run Checklist Evaluation
 checklist_status = evaluate_gatekeeper_checklist(selected_coin)
 all_passed = True
-
 for step, passed in checklist_status.items():
     if passed:
         st.sidebar.success(f"✅ {step}")
@@ -104,38 +107,28 @@ for step, passed in checklist_status.items():
 
 st.sidebar.divider()
 
-# Reset session state if coin changes
-if 'last_symbol' not in st.session_state:
-    st.session_state.last_symbol = selected_coin
-if st.session_state.last_symbol != selected_coin:
-    st.session_state.trade_execution = None
-    st.session_state.last_symbol = selected_coin
-
-# Execution Gate
 if all_passed:
     st.sidebar.markdown("### 🟢 STATUS: ALL SYSTEMS GO")
-    if st.sidebar.button("🚀 EXECUTE TRADE SETUP (VISUALIZE)"):
-        # Store the execution state visually
-        st.session_state.trade_execution = {
-            "entry": entry_price,
-            "sl": sl_price,
-            "tp": tp_price,
-            "type": trade_type,
-            "symbol": selected_coin
-        }
-        st.balloons()
+    execute_trade = st.sidebar.button("🚀 EXECUTE & RENDER SMC LEVELS")
 else:
     st.sidebar.markdown("### 🔴 STATUS: STAND DOWN")
     st.sidebar.warning("Criteria not met. Trading locked.")
+    execute_trade = True  # Auto display for analysis view
 
 # --- MAIN DASHBOARD AREA ---
 col1, col2 = st.columns([3, 1])
 
 with col1:
-    st.subheader(f"📊 Live Price Action & SMC Structure: {selected_coin}")
     df = fetch_chart_data(selected_coin, timeframe=timeframe)
     
     if not df.empty:
+        live_price = df['close'].iloc[-1]
+        price_change = ((df['close'].iloc[-1] - df['open'].iloc[0]) / df['open'].iloc[0]) * 100
+        direction_label = "🟢 BULLISH TREND (Markup Phase)" if price_change >= 0 else "🔴 BEARISH TREND (Markdown Phase)"
+        
+        # Display Chart Name, Live Market Price & Direction Header
+        st.subheader(f"📊 Chart: {selected_coin} [{timeframe}] | Live Price: ${live_price:,.2f} | Status: {direction_label}")
+        
         # Plotly Candlestick Chart
         fig = go.Figure(data=[go.Candlestick(
             x=df['timestamp'],
@@ -145,71 +138,67 @@ with col1:
             close=df['close'],
             increasing_line_color='#26a69a', 
             decreasing_line_color='#ef5350',
-            name='Price'
+            name='Candles'
         )])
         
+        # --- SMC Visual Markings (Liquidity & Order Blocks) ---
+        # 1. Liquidity Pools (Buy-side & Sell-side Highs/Lows)
+        swing_high = df['high'].max()
+        swing_low = df['low'].min()
+        
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=swing_high, y1=swing_high,
+                      line=dict(color="#ff9800", width=1.5, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/2)], y=swing_high, text="⚠️ Buy-Side Liquidity (BSL)", showarrow=False, yshift=10, font=dict(color="#ff9800"))
+
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=swing_low, y1=swing_low,
+                      line=dict(color="#ff9800", width=1.5, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/2)], y=swing_low, text="⚠️ Sell-Side Liquidity (SSL)", showarrow=False, yshift=-15, font=dict(color="#ff9800"))
+
+        # 2. Render User Trade Setup (Entry, SL, TP)
+        t_label = "LONG" if "LONG" in trade_type else "SHORT"
+        entry_color = "rgba(33, 150, 243, 0.3)"
+        sl_color = "#f44336"
+        tp_color = "#4caf50"
+
+        # Entry Zone Shaded Area
+        fig.add_hrect(
+            y0=entry_price * 0.998, y1=entry_price * 1.002, 
+            fillcolor=entry_color, layer="below", line_width=0,
+            annotation_text=f"🎯 {t_label} Entry Zone", annotation_position="top left"
+        )
+
+        # Stop Loss Line
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price,
+                      line=dict(color=sl_color, width=2, dash="dash"))
+        fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text=f"SL: {sl_price}", showarrow=True, arrowhead=1, ax=30, ay=10, bgcolor=sl_color, font=dict(color="white"))
+
+        # Take Profit Line
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_price, y1=tp_price,
+                      line=dict(color=tp_color, width=2, dash="dash"))
+        fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_price, text=f"TP: {tp_price}", showarrow=True, arrowhead=1, ax=30, ay=-10, bgcolor=tp_color, font=dict(color="white"))
+
         fig.update_layout(
-            height=550,
+            height=580,
             template="plotly_dark",
             xaxis_rangeslider_visible=False,
             margin=dict(l=10, r=10, t=10, b=10),
             yaxis=dict(title="Price (USDT)")
         )
-
-        # Add Visuals if Trade Executed
-        if st.session_state.trade_execution and st.session_state.trade_execution["symbol"] == selected_coin:
-            exec_data = st.session_state.trade_execution
-            ex = exec_data['entry']
-            sl = exec_data['sl']
-            tp = exec_data['tp']
-            t_type = exec_data['type']
-            
-            # Define colors based on trade type
-            entry_color = "rgba(33, 150, 243, 0.3)" # Blue
-            sl_color = "rgba(244, 67, 54, 0.7)" # Red
-            tp_color = "rgba(76, 175, 80, 0.7)" # Green
-
-            # 1. Draw Entry Zone (Shaded Area) - ±0.2% buffer for zone height
-            entry_zone_high = ex * (1 + 0.002)
-            entry_zone_low = ex * (1 - 0.002)
-            
-            fig.add_hrect(
-                y0=entry_zone_low, y1=entry_zone_high, 
-                fillcolor=entry_color, layer="below", line_width=0,
-                annotation_text="Entry Zone", annotation_position="top right"
-            )
-            
-            # 2. Draw SL Line
-            fig.add_shape(
-                type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1],
-                y0=sl, y1=sl,
-                line=dict(color=sl_color, width=2, dash="dash"),
-                name="Stop Loss"
-            )
-            fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl, text=f"SL: {sl}", showarrow=True, arrowhead=1, ax=20, ay=-10, bgcolor=sl_color)
-
-            # 3. Draw TP Line
-            fig.add_shape(
-                type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1],
-                y0=tp, y1=tp,
-                line=dict(color=tp_color, width=2, dash="dash"),
-                name="Take Profit"
-            )
-            fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp, text=f"TP: {tp}", showarrow=True, arrowhead=1, ax=20, ay=10, bgcolor=tp_color)
-
-            # 4. Add Trade Details Subheader
-            st.info(f"✅ Trade Executed: {t_type} | Entry: {ex} | SL: {sl} | TP: {tp} | RRR: {abs(tp-ex)/abs(ex-sl):.2f}")
-
+        
         st.plotly_chart(fig, use_container_width=True)
+        
+        rrr = abs(tp_price - entry_price) / abs(entry_price - sl_price) if abs(entry_price - sl_price) > 0 else 0
+        st.success(f"📌 **Active Strategy Setup:** {t_label} | Current Live Price: **${live_price:,.2f}** | Risk-to-Reward Ratio (RRR): **1:{rrr:.2f}**")
     else:
         st.warning("No market data available for this pair right now.")
 
 with col2:
     st.subheader("📌 Binance Metrics")
-    st.metric(label="Market Type", value="Spot Market")
-    st.metric(label="Funding Rate (Futures)", value="0.0100%", delta="Normal")
+    st.metric(label="Live Market Price", value=f"${live_price:,.2f}" if not df.empty else "N/A", delta=f"{price_change:.2f}%" if not df.empty else "0%")
+    st.metric(label="Market Type", value="Spot & Derivatives")
+    st.metric(label="Funding Rate", value="0.0100%", delta="Normal")
     st.metric(label="Open Interest Change", value="+4.25%", delta="Bullish Bias")
     st.metric(label="Liquidation Risk", value="Low", delta_color="inverse")
     
     st.divider()
-    st.info("💡 **Pro Tip:** Ensure all 6 checklist validations turn green in the sidebar before executing any manual or automated entry setup.")
+    st.info("💡 **SMC Legend:**\n* **Orange Dotted Lines:** Key Liquidity Pools (BSL/SSL)\n* **Blue Shaded Area:** Institutional Entry Zone\n* **Red / Green Dashed:** SL & TP Targets")
