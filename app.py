@@ -12,10 +12,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# Enable Auto-Refresh every 5 seconds for Real-Time Live Price Movement tracking
 count = st_autorefresh(interval=5000, limit=None, key="live_price_counter")
 
-# 2. Expanded Binance Searchable Coin List (Type to Search Enabled)
+# 2. Expanded Binance Searchable Coin List
 @st.cache_data(ttl=300)
 def fetch_available_coins():
     return [
@@ -27,7 +26,7 @@ def fetch_available_coins():
         "ATOM/USDT", "LTC/USDT", "BCH/USDT", "ETC/USDT", "XLM/USDT"
     ]
 
-# 3. Fetch OHLCV Chart Data via Public Binance Kline Endpoint
+# 3. Fetch OHLCV Chart Data
 def fetch_chart_data(symbol, timeframe='1h', limit=150):
     try:
         clean_symbol = symbol.replace("/", "")
@@ -55,7 +54,7 @@ def fetch_chart_data(symbol, timeframe='1h', limit=150):
     except Exception as e:
         return pd.DataFrame()
 
-# 4. Automatic SMC Order Block (OB) & FVG Detection Algorithm
+# 4. Automatic SMC Order Block & FVG Detection
 def detect_smc_zones(df):
     if df.empty or len(df) < 10:
         return [], []
@@ -82,7 +81,6 @@ def detect_smc_zones(df):
             
     return order_blocks[-3:], fvgs[-3:]
 
-# 5. Professional 6-Step Gatekeeper Checklist Engine
 def evaluate_gatekeeper_checklist(symbol):
     return {
         "1. Trend Direction (HTF Structure)": True,
@@ -97,17 +95,14 @@ def evaluate_gatekeeper_checklist(symbol):
 st.title("⚡ Institutional SMC Professional Trading Terminal")
 st.markdown("Advanced crypto terminal featuring Automated Order Blocks, Fair Value Gaps, MTF Matrix, and Real-Time Risk Calculation.")
 
-# Sidebar Controls
 st.sidebar.header("🎛 Control & Risk Hub")
 
 all_symbols = fetch_available_coins()
 default_index = all_symbols.index("BTC/USDT") if "BTC/USDT" in all_symbols else 0
 
-# මෙතැනදී ඕනෑම coin එකක නමක් Box එක ඇතුළේ Type කරලා Search කරන්න පුළුවන් (Built-in Search)
 selected_coin = st.sidebar.selectbox("🔍 Search & Select Trading Pair:", all_symbols, index=default_index)
 timeframe = st.sidebar.selectbox("Select Timeframe:", ["15m", "1h", "4h", "1d"], index=1)
 
-# Fetch current live price to set default parameters dynamically
 df_live = fetch_chart_data(selected_coin, timeframe=timeframe, limit=5)
 current_live_price = df_live['close'].iloc[-1] if not df_live.empty else 60000.0
 
@@ -120,26 +115,29 @@ st.sidebar.divider()
 st.sidebar.subheader("📈 Trade Setup Configuration")
 trade_type = st.sidebar.radio("Direction Strategy:", ["LONG (Bullish)", "SHORT (Bearish)"], horizontal=True)
 
+# Price එක මත පදනම්ව ස්වයංක්‍රීයව பொருத்தமான percentage එකකින් SL සහ TP සකස් කිරීම
 if "LONG" in trade_type:
     def_entry = current_live_price
-    def_sl = current_live_price * 0.992
-    def_tp = current_live_price * 1.025
+    def_sl = current_live_price * 0.98 if current_live_price < 1 else current_live_price * 0.992
+    def_tp = current_live_price * 1.05 if current_live_price < 1 else current_live_price * 1.025
 else:
     def_entry = current_live_price
-    def_sl = current_live_price * 1.008
-    def_tp = current_live_price * 0.975
+    def_sl = current_live_price * 1.02 if current_live_price < 1 else current_live_price * 1.008
+    def_tp = current_live_price * 0.95 if current_live_price < 1 else current_live_price * 0.975
 
-entry_price = st.sidebar.number_input("Entry Price:", value=float(def_entry), step=1.0)
-sl_price = st.sidebar.number_input("Stop Loss (SL) Price:", value=float(def_sl), step=1.0)
-tp_price = st.sidebar.number_input("Take Profit (TP) Price:", value=float(def_tp), step=1.0)
+# Step එක සහ Format එක Coin එකේ වටිනාකමට අනුව වෙනස් කිරීම (Micro-price coins සඳහා step 0.0001 දමා ඇත)
+p_step = 0.0001 if current_live_price < 10 else 1.0
 
-# Position Size & Risk Calculation Math
+entry_price = st.sidebar.number_input("Entry Price:", value=float(def_entry), format="%.4f", step=p_step)
+sl_price = st.sidebar.number_input("Stop Loss (SL) Price:", value=float(def_sl), format="%.4f", step=p_step)
+tp_price = st.sidebar.number_input("Take Profit (TP) Price:", value=float(def_tp), format="%.4f", step=p_step)
+
 risk_amount_usd = account_balance * (risk_percentage / 100.0)
 price_risk_per_unit = abs(entry_price - sl_price)
 position_size_units = risk_amount_usd / price_risk_per_unit if price_risk_per_unit > 0 else 0
 position_size_usd = position_size_units * entry_price
 
-st.sidebar.info(f"💡 **Position Sizing:** Risk Amount: **${risk_amount_usd:.2f}** | Recommended Size: **{position_size_units:.4f} units (~${position_size_usd:,.2f})**")
+st.sidebar.info(f"💡 **Position Sizing:** Risk Amount: **${risk_amount_usd:.2f}** | Size: **{position_size_units:,.2f} units (~${position_size_usd:,.2f})**")
 
 st.sidebar.divider()
 st.sidebar.subheader("🔒 Professional 6-Step Checklist")
@@ -154,12 +152,10 @@ for step, passed in checklist_status.items():
         all_passed = False
 
 st.sidebar.divider()
-
 if all_passed:
     st.sidebar.markdown("### 🟢 STATUS: ALL SYSTEMS GO")
 else:
     st.sidebar.markdown("### 🔴 STATUS: STAND DOWN")
-    st.sidebar.warning("Criteria not met. Trading locked.")
 
 # --- MAIN DASHBOARD AREA ---
 col1, col2 = st.columns([3, 1])
@@ -172,7 +168,6 @@ with col1:
         price_change = ((df['close'].iloc[-1] - df['open'].iloc[0]) / df['open'].iloc[0]) * 100
         direction_label = "🟢 BULLISH TREND (Markup Phase)" if price_change >= 0 else "🔴 BEARISH TREND (Markdown Phase)"
         
-        # Multi-Timeframe Confluence Matrix Display
         st.markdown("### 🌐 Multi-Timeframe Confluence Matrix")
         mtf_col1, mtf_col2, mtf_col3, mtf_col4 = st.columns(4)
         mtf_col1.metric("15m Trend", "Bullish" if price_change >= 0 else "Bearish", delta="Active")
@@ -180,9 +175,8 @@ with col1:
         mtf_col3.metric("4h Trend", "Bullish Structural", delta="Strong")
         mtf_col4.metric("Daily Trend", "Markup Phase", delta="HTF OK")
         
-        st.subheader(f"📊 Chart: {selected_coin} [{timeframe}] | Live Price: ${live_price:,.2f} | {direction_label}")
+        st.subheader(f"📊 Chart: {selected_coin} [{timeframe}] | Live Price: ${live_price:,.4f} | {direction_label}")
         
-        # Plotly Candlestick Chart
         fig = go.Figure(data=[go.Candlestick(
             x=df['timestamp'],
             open=df['open'],
@@ -194,7 +188,6 @@ with col1:
             name='Candles'
         )])
         
-        # --- Automated SMC Zones (Order Blocks & FVGs) ---
         obs, fvgs = detect_smc_zones(df)
         
         for fvg in fvgs:
@@ -205,7 +198,6 @@ with col1:
                 annotation_text="Fair Value Gap (FVG)", annotation_position="top right"
             )
 
-        # Liquidity Pools (BSL & SSL)
         swing_high = df['high'].max()
         swing_l = df['low'].min()
         
@@ -217,7 +209,6 @@ with col1:
                     line=dict(color="#ff9800", width=1.5, dash="dot"))
         fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/2)], y=swing_l, text="⚠️ Sell-Side Liquidity (SSL)", showarrow=False, yshift=-15, font=dict(color="#ff9800"))
 
-        # User Trade Setup (Entry Zone, SL, TP)
         t_label = "LONG" if "LONG" in trade_type else "SHORT"
         entry_color = "rgba(33, 150, 243, 0.3)"
         sl_color = "#f44336"
@@ -248,13 +239,13 @@ with col1:
         st.plotly_chart(fig, use_container_width=True)
         
         rrr = abs(tp_price - entry_price) / abs(entry_price - sl_price) if abs(entry_price - sl_price) > 0 else 0
-        st.success(f"📌 **Active Strategy Execution:** {t_label} | Real-Time Live Price: **${live_price:,.2f}** | RRR: **1:{rrr:.2f}** | Position Size: **{position_size_units:.4f} units**")
+        st.success(f"📌 **Active Strategy Execution:** {t_label} | Real-Time Live Price: **${live_price:,.4f}** | RRR: **1:{rrr:.2f}** | Position Size: **{position_size_units:,.2f} units**")
     else:
         st.warning("No market data available for this pair right now.")
 
 with col2:
     st.subheader("📌 Binance Metrics")
-    st.metric(label="Live Market Price", value=f"${live_price:,.2f}" if not df.empty else "N/A", delta=f"{price_change:.2f}%" if not df.empty else "0%")
+    st.metric(label="Live Market Price", value=f"${live_price:,.4f}" if not df.empty else "N/A", delta=f"{price_change:.2f}%" if not df.empty else "0%")
     st.metric(label="Market Type", value="Spot & Derivatives")
     st.metric(label="Funding Rate", value="0.0100%", delta="Normal")
     st.metric(label="Open Interest Change", value="+4.25%", delta="Bullish Bias")
@@ -262,11 +253,11 @@ with col2:
     
     st.divider()
     st.markdown("### 🎯 Institutional Summary:")
-    st.markdown(f"- **Account Risk:** `${risk_amount_usd:.2f}` ({risk_percentage}%)")
-    st.markdown(f"- **Calculated Lot/Units:** `{position_size_units:.4f}`")
-    st.markdown(f"- **Entry Zone:** `${entry_price:,.2f}`")
-    st.markdown(f"- **Stop Loss:** `${sl_price:,.2f}`")
-    st.markdown(f"- **Take Profit:** `${tp_price:,.2f}`")
+    st.markdown(f"- **Account Risk:** `${risk_amount_usd:,.2f}` ({risk_percentage}%)")
+    st.markdown(f"- **Calculated Lot/Units:** `{position_size_units:,.2f}`")
+    st.markdown(f"- **Entry Zone:** `${entry_price:,.4f}`")
+    st.markdown(f"- **Stop Loss:** `${sl_price:,.4f}`")
+    st.markdown(f"- **Take Profit:** `${tp_price:,.4f}`")
     
     st.divider()
     st.info("💡 **Pro Toolkit Active:** Multi-timeframe confluence, automated FVG zones, and exact risk position sizing are fully synchronized.")
