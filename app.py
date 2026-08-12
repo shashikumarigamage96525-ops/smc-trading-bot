@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import ccxt
+import requests
 import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 
@@ -8,48 +8,63 @@ from streamlit_autorefresh import st_autorefresh
 st.set_page_config(page_title="Institutional SMC Terminal - Pro", page_icon="⚡", layout="wide")
 count = st_autorefresh(interval=10000, limit=None)
 
-# 1. Initialize CCXT Binance Exchange
-@st.cache_resource
-def get_exchange():
-    return ccxt.binance({
-        'enableRateLimit': True,
-        'options': {'defaultType': 'spot'}
-    })
-
-exchange = get_exchange()
-
-# 2. Get All Active USDT Pairs via CCXT
+# 1. Reliable Coin List with CoinGecko ID mapping
 @st.cache_data(ttl=3600)
-def get_ccxt_symbols():
-    try:
-        exchange.load_markets()
-        symbols = [s for s in exchange.symbols if '/USDT' in s]
-        return sorted(symbols)
-    except:
-        return ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT"]
+def get_coin_list():
+    return {
+        "BTC/USDT": "bitcoin",
+        "ETH/USDT": "ethereum",
+        "SOL/USDT": "solana",
+        "BNB/USDT": "binancecoin",
+        "XRP/USDT": "ripple",
+        "ADA/USDT": "cardano",
+        "DOGE/USDT": "dogecoin",
+        "SUI/USDT": "sui",
+        "PEPE/USDT": "pepe",
+        "AVAX/USDT": "avalanche-2",
+        "LINK/USDT": "chainlink",
+        "NEAR/USDT": "near",
+        "MATIC/USDT": "polygon-ecosystem-token",
+        "DOT/USDT": "polkadot",
+        "SHIB/USDT": "shiba-inu",
+        "UNI/USDT": "uniswap",
+        "APT/USDT": "aptos",
+        "RENDER/USDT": "render-token",
+        "FET/USDT": "fetch-ai",
+        "INJ/USDT": "injective-protocol"
+    }
 
-# 3. Fetch OHLCV Data via CCXT
-def fetch_ccxt_data(symbol, timeframe):
+# 2. Fetch Chart Data using Public CoinGecko API (Zero IP Block)
+def fetch_chart_data(coin_id, timeframe):
+    days = "1" if timeframe in ["15m", "1h"] else "30"
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc?vs_currency=usd&days={days}"
+    
     try:
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
-        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        df['ts'] = pd.to_datetime(df['timestamp'], unit='ms')
-        for col in ['open', 'high', 'low', 'close', 'volume']:
-            df[col] = df[col].astype(float)
-        return df
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list) and len(data) > 0:
+                df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close'])
+                df['ts'] = pd.to_datetime(df['timestamp'], unit='ms')
+                for col in ['open', 'high', 'low', 'close']:
+                    df[col] = df[col].astype(float)
+                return df
     except:
-        return pd.DataFrame()
+        pass
+    return pd.DataFrame()
 
 # --- UI LAYOUT ---
 st.sidebar.header("🎛 Institutional Hub")
-all_pairs = get_ccxt_symbols()
+coins_dict = get_coin_list()
+coin_names = list(coins_dict.keys())
 
-default_idx = all_pairs.index("BTC/USDT") if "BTC/USDT" in all_pairs else 0
-selected_pair = st.sidebar.selectbox("🔍 Type & Search Any Coin:", all_pairs, index=default_idx)
+default_idx = coin_names.index("BTC/USDT") if "BTC/USDT" in coin_names else 0
+selected_pair = st.sidebar.selectbox("🔍 Type & Search Any Coin:", coin_names, index=default_idx)
 tf = st.sidebar.selectbox("Timeframe:", ["15m", "1h", "4h", "1d"], index=1)
 
 # Fetch Data
-df = fetch_ccxt_data(selected_pair, tf)
+coin_id = coins_dict[selected_pair]
+df = fetch_chart_data(coin_id, tf)
 
 if not df.empty:
     price = df['close'].iloc[-1]
@@ -60,10 +75,9 @@ if not df.empty:
     swing_h = df['high'].max()
     swing_l = df['low'].min()
     
-    # Automatic SMC Setup (Long Scenario based on recent sweep)
     entry_price = price
-    stop_loss = swing_l - ((swing_h - swing_l) * 0.05) # Below Sell-side liquidity
-    take_profit = swing_h + ((swing_h - swing_l) * 0.2)  # Target above Buy-side liquidity
+    stop_loss = swing_l - ((swing_h - swing_l) * 0.05)
+    take_profit = swing_h + ((swing_h - swing_l) * 0.2)
     
     st.subheader(f"📊 SMC Execution Chart: {selected_pair} [{tf}]")
     
@@ -114,7 +128,7 @@ if not df.empty:
     c1.success("✅ Risk-to-Reward Ratio Optimized (>1:2)")
     c2.success("✅ Market Structure Aligned")
     c2.success("✅ Volume & Momentum Confirmed")
-    c2.success("✅ Live CCXT Stream Active")
+    c2.success("✅ Public API Feed Active")
     
     st.sidebar.divider()
     st.sidebar.info(f"💡 **Active Setup:** `{selected_pair}` loaded with Auto Entry, SL, TP & Liquidity levels.")
