@@ -67,7 +67,7 @@ def calculate_indicators(df):
     df['RSI'] = 100 - (100 / (1 + rs))
     return df
 
-# 5. Strict & Accurate Dominant Pattern Detection Engine
+# 5. Trend-Filtered Accurate Pattern Detection Engine
 def detect_dominant_pattern(df):
     if df.empty or len(df) < 50:
         return [], [], None
@@ -90,37 +90,45 @@ def detect_dominant_pattern(df):
     supports = sorted(list(set(supports)))[:3]
     
     dominant_pattern = None
+    live_price = closes[-1]
+    ema_50 = df['EMA_50'].iloc[-1]
     
-    # Strict Double Top Check (Requires real separation and precise level matching)
     recent_highs = highs[-50:]
     max_h = max(recent_highs)
     peak_indices = [i for i, h in enumerate(recent_highs) if h >= max_h * 0.992]
     
-    if len(peak_indices) >= 2:
-        # Check if peaks are well separated in time
-        if (peak_indices[-1] - peak_indices[0]) > 12:
-            dominant_pattern = {
-                'name': 'Double Top Reversal',
-                'level': max_h,
-                'time': times[-1],
-                'bias': 'Bearish',
-                'desc': 'Validated dual resistance rejection with clear time separation.'
-            }
+    if len(peak_indices) >= 2 and (peak_indices[-1] - peak_indices[0]) > 12:
+        dominant_pattern = {
+            'name': 'Double Top Reversal',
+            'level': max_h,
+            'time': times[-1],
+            'bias': 'Bearish',
+            'desc': 'Validated dual resistance rejection with clear time separation.'
+        }
             
-    # Strict Double Bottom Check
+    # Double Bottom requires Bullish or Neutral Trend context (Price above EMA 50 or close to it)
     if not dominant_pattern:
         recent_lows = lows[-50:]
         min_l = min(recent_lows)
         trough_indices = [i for i, l in enumerate(recent_lows) if l <= min_l * 1.008]
         
-        if len(trough_indices) >= 2:
-            if (trough_indices[-1] - trough_indices[0]) > 12:
+        # Prevent false Double Bottom in a strong free-fall downtrend
+        if len(trough_indices) >= 2 and (trough_indices[-1] - trough_indices[0]) > 12:
+            if live_price >= (ema_50 * 0.95):  # Must not be deeply below trend
                 dominant_pattern = {
                     'name': 'Double Bottom Reversal',
                     'level': min_l,
                     'time': times[-1],
                     'bias': 'Bullish',
                     'desc': 'Validated dual support defense with clear time separation.'
+                }
+            else:
+                dominant_pattern = {
+                    'name': 'Strong Downtrend (No Reversal)',
+                    'level': min_l,
+                    'time': times[-1],
+                    'bias': 'Bearish',
+                    'desc': 'Price is in a free-fall downtrend. Support levels are unsafe.'
                 }
 
     return supports, resistances, dominant_pattern
@@ -137,7 +145,7 @@ def evaluate_gatekeeper_checklist(symbol):
 
 # --- UI LAYOUT ---
 st.title("⚡ Institutional Professional Technical Analysis Terminal")
-st.markdown("Advanced terminal featuring strict Single-Pattern Filtering, Support/Resistance zones, and institutional risk metrics.")
+st.markdown("Advanced terminal featuring strict Trend-Filtered Pattern Recognition and risk metrics.")
 
 st.sidebar.header("🎛 Control & Risk Hub")
 
@@ -227,9 +235,9 @@ with col1:
         rep_col3.metric("Dominant Pattern", pattern['name'] if pattern else "No Clear Pattern")
         
         if pattern:
-            st.info(f"🎯 **Validated Pattern Signal:** **{pattern['name']}** detected with **{pattern['bias']} Bias** at Level **${pattern['level']:,.4f}**. *{pattern['desc']}*")
+            st.info(f"🎯 **Validated Structure:** **{pattern['name']}** detected with **{pattern['bias']} Bias** at Level **${pattern['level']:,.4f}**. *{pattern['desc']}*")
         else:
-            st.success("Market structure is clean. No forced patterns. Awaiting high-probability structural setups.")
+            st.success("Market structure is clean. No forced patterns. Awaiting high-probability setups.")
         
         st.subheader(f"📊 Chart: {selected_coin} [{timeframe}] | Live Price: ${live_price:,.4f}")
         
@@ -311,4 +319,4 @@ with col2:
     st.markdown(f"- **Take Profit:** `${tp_price:,.4f}`")
     
     st.divider()
-    st.info("💡 **Pro Intelligence:** Strict time-separation filters applied. False multi-pattern alerts have been eliminated.")
+    st.info("💡 **Pro Intelligence:** Trend-filtering enabled. Downtrend free-falls are now correctly classified to prevent false reversal alerts.")
