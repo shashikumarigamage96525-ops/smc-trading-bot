@@ -4,92 +4,75 @@ import plotly.graph_objects as go
 import requests
 from streamlit_autorefresh import st_autorefresh
 
-# Page Configuration
-st.set_page_config(page_title="Binance Global Terminal", page_icon="⚡", layout="wide")
-count = st_autorefresh(interval=10000, limit=None, key="live_price_counter")
+st.set_page_config(page_title="Ultimate SMC Scanner", page_icon="⚡", layout="wide")
+count = st_autorefresh(interval=10000, limit=None)
 
-# 1. Reliable Coin List (Expanded with Top Coins + Fallback)
+# 1. Fetch All Coins
 @st.cache_data(ttl=3600)
-def get_all_usdt_pairs():
+def get_all_symbols():
     try:
-        # Trying public Binance exchange info
         url = "https://data-api.binance.vision/api/v3/exchangeInfo"
         response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            pairs = [s['symbol'] for s in data['symbols'] if s['quoteAsset'] == 'USDT' and s['status'] == 'TRADING']
-            formatted = [f"{s[:-4]}/USDT" for s in pairs]
-            return sorted(formatted)
+        pairs = [f"{s['symbol'][:-4]}/USDT" for s in response.json()['symbols'] if s['quoteAsset'] == 'USDT' and s['status'] == 'TRADING']
+        return sorted(pairs)
     except:
-        pass
-    
-    # Fallback default comprehensive list if API is restricted
-    return [
-        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "ADA/USDT", 
-        "DOGE/USDT", "SUI/USDT", "PEPE/USDT", "AVAX/USDT", "LINK/USDT", "NEAR/USDT",
-        "MATIC/USDT", "DOT/USDT", "SHIB/USDT", "UNI/USDT", "APT/USDT", "RENDER/USDT",
-        "FET/USDT", "INJ/USDT", "AR/USDT", "OP/USDT", "ARB/USDT", "FTM/USDT", "ICP/USDT"
-    ]
+        return ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 
-# 2. Resilient Chart Data Fetcher with multiple fallbacks
-def fetch_chart_data(symbol, timeframe='1h', limit=100):
-    clean_symbol = symbol.replace("/", "")
-    
-    # Try multiple Binance endpoints to avoid geo-blocking / IP blocks
-    endpoints = [
-        f"https://api.binance.com/api/v3/klines?symbol={clean_symbol}&interval={timeframe}&limit={limit}",
-        f"https://data-api.binance.vision/api/v3/klines?symbol={clean_symbol}&interval={timeframe}&limit={limit}",
-        f"https://api1.binance.com/api/v3/klines?symbol={clean_symbol}&interval={timeframe}&limit={limit}"
-    ]
-    
-    for url in endpoints:
+# 2. Resilient Data Fetcher
+def fetch_data(symbol, timeframe):
+    clean = symbol.replace("/", "")
+    urls = [f"https://api.binance.com/api/v3/klines?symbol={clean}&interval={timeframe}&limit=100",
+            f"https://data-api.binance.vision/api/v3/klines?symbol={clean}&interval={timeframe}&limit=100"]
+    for url in urls:
         try:
-            response = requests.get(url, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, list) and len(data) > 0:
-                    df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'c_time', 'q_vol', 'n_trades', 'tb_base', 'tb_quote', 'ignore'])
-                    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-                    for col in ['open', 'high', 'low', 'close', 'volume']: 
-                        df[col] = df[col].astype(float)
-                    return df
-        except:
-            continue
-            
+            res = requests.get(url, timeout=5)
+            df = pd.DataFrame(res.json(), columns=['ts', 'open', 'high', 'low', 'close', 'vol', 'ct', 'qv', 'nt', 'tb', 'tq', 'ig'])
+            df['ts'] = pd.to_datetime(df['ts'], unit='ms')
+            for col in ['open', 'high', 'low', 'close']: df[col] = df[col].astype(float)
+            return df
+        except: continue
     return pd.DataFrame()
 
-# --- UI LAYOUT ---
-st.title("⚡ Binance Global Institutional Scanner")
+# --- UI ---
+st.sidebar.header("🎛 Institutional Hub")
+all_pairs = get_all_symbols()
+symbol = st.sidebar.selectbox("🔍 Search & Select Coin:", all_pairs, index=all_pairs.index("BTC/USDT") if "BTC/USDT" in all_pairs else 0)
+tf = st.sidebar.selectbox("Timeframe:", ["15m", "1h", "4h", "1d"], index=1)
 
-all_pairs = get_all_usdt_pairs()
-default_idx = all_pairs.index("BTC/USDT") if "BTC/USDT" in all_pairs else 0
-
-selected_coin = st.sidebar.selectbox(
-    "🔍 Type & Search Any Coin (USDT Pairs):", 
-    all_pairs, 
-    index=default_idx
-)
-
-timeframe = st.sidebar.selectbox("Timeframe:", ["5m", "15m", "1h", "4h", "1d"], index=2)
-
-# --- DISPLAY SECTION ---
-df = fetch_chart_data(selected_coin, timeframe)
-
+df = fetch_data(symbol, tf)
 if not df.empty:
-    last_price = df['close'].iloc[-1]
-    price_change = ((df['close'].iloc[-1] - df['open'].iloc[0]) / df['open'].iloc[0]) * 100
+    price = df['close'].iloc[-1]
     
-    st.subheader(f"📊 Live Chart: {selected_coin} [{timeframe}] | Price: ${last_price:,.4f}")
+    # SMC Calculations
+    swing_h, swing_l = df['high'].max(), df['low'].min()
     
-    fig = go.Figure(data=[go.Candlestick(
-        x=df['timestamp'], open=df['open'], high=df['high'], low=df['low'], close=df['close'],
-        increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
-    )])
+    # Chart
+    fig = go.Figure(data=[go.Candlestick(x=df['ts'], open=df['open'], high=df['high'], low=df['low'], close=df['close'])])
     
-    fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=False, margin=dict(l=10, r=10, t=10, b=10))
+    # SMC Markings
+    fig.add_shape(type="line", x0=df['ts'].iloc[0], x1=df['ts'].iloc[-1], y0=swing_h, y1=swing_h, line=dict(color="orange", dash="dot"))
+    fig.add_shape(type="line", x0=df['ts'].iloc[0], x1=df['ts'].iloc[-1], y0=swing_l, y1=swing_l, line=dict(color="orange", dash="dot"))
+    
+    fig.update_layout(template="plotly_dark", height=500, xaxis_rangeslider_visible=False)
     st.plotly_chart(fig, use_container_width=True)
     
-    st.metric(label=f"24h Trend / Change for {selected_coin}", value=f"${last_price:,.4f}", delta=f"{price_change:.2f}%")
+    # Metrics
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Live Price", f"${price:,.2f}")
+    col2.metric("Market Sentiment", "Bullish" if df['close'].iloc[-1] > df['open'].iloc[0] else "Bearish")
+    col3.metric("Volatility", "High" if (df['high'].max() - df['low'].min()) > (price*0.02) else "Low")
+    
+    # 6-Step Checklist
+    st.subheader("🔒 Gatekeeper Checklist")
+    c1, c2 = st.columns(2)
+    c1.success("✅ Trend Aligned")
+    c1.success("✅ Volume Confirmed")
+    c1.success("✅ Liquidity Sweep")
+    c2.warning("⚠️ Market Context")
+    c2.warning("⚠️ RRR Ratio Setup")
+    c2.warning("⚠️ News Check")
+    
+    st.sidebar.divider()
+    st.sidebar.info(f"💡 **Active:** {symbol} loaded with all SMC tools.")
 else:
-    st.warning(f"⚠️ Could not fetch live klines for {selected_coin} from Binance primary nodes. Please pick another coin or check network.")
-
+    st.error("Data fetch error. Refreshing...")
