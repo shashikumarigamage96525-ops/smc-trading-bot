@@ -3,14 +3,17 @@ import ccxt
 import pandas as pd
 import plotly.graph_objects as go
 import requests
-import numpy as np
+from streamlit_autorefresh import st_autorefresh
 
 # 1. Page Configuration & Setup
 st.set_page_config(
-    page_title="Institutional SMC & Binance Terminal",
+    page_title="Institutional SMC & Binance Live Terminal",
     page_icon="⚡",
     layout="wide"
 )
+
+# Enable Auto-Refresh every 5 seconds for Real-Time Price Movement
+count = st_autorefresh(interval=5000, limit=None, key="live_price_counter")
 
 # 2. Public CoinGecko Symbol & Data Fetcher
 @st.cache_data(ttl=300)
@@ -60,8 +63,8 @@ def evaluate_gatekeeper_checklist(symbol):
     }
 
 # --- UI LAYOUT ---
-st.title("🚀 Institutional SMC & Binance Trading Terminal")
-st.markdown("Professional-grade crypto analytics terminal equipped with Smart Money Concepts (SMC) & Multi-Factor Gatekeeper.")
+st.title("⚡ Institutional SMC & Binance Live Terminal")
+st.markdown("Professional-grade live crypto analytics terminal with automated real-time price updates.")
 
 # Sidebar Controls
 st.sidebar.header("🎛 Control Hub")
@@ -79,15 +82,14 @@ st.sidebar.divider()
 st.sidebar.subheader("📈 Trade Setup Configuration")
 trade_type = st.sidebar.radio("Direction Strategy:", ["LONG (Bullish)", "SHORT (Bearish)"], horizontal=True)
 
-# Smart defaults based on direction
 if "LONG" in trade_type:
     def_entry = current_live_price
-    def_sl = current_live_price * 0.992  # 0.8% below
-    def_tp = current_live_price * 1.025  # 2.5% above
+    def_sl = current_live_price * 0.992
+    def_tp = current_live_price * 1.025
 else:
     def_entry = current_live_price
-    def_sl = current_live_price * 1.008  # 0.8% above
-    def_tp = current_live_price * 0.975  # 2.5% below
+    def_sl = current_live_price * 1.008
+    def_tp = current_live_price * 0.975
 
 entry_price = st.sidebar.number_input("Entry Price:", value=float(def_entry), step=1.0)
 sl_price = st.sidebar.number_input("Stop Loss (SL) Price:", value=float(def_sl), step=1.0)
@@ -109,11 +111,9 @@ st.sidebar.divider()
 
 if all_passed:
     st.sidebar.markdown("### 🟢 STATUS: ALL SYSTEMS GO")
-    execute_trade = st.sidebar.button("🚀 EXECUTE & RENDER SMC LEVELS")
 else:
     st.sidebar.markdown("### 🔴 STATUS: STAND DOWN")
     st.sidebar.warning("Criteria not met. Trading locked.")
-    execute_trade = True  # Auto display for analysis view
 
 # --- MAIN DASHBOARD AREA ---
 col1, col2 = st.columns([3, 1])
@@ -126,7 +126,7 @@ with col1:
         price_change = ((df['close'].iloc[-1] - df['open'].iloc[0]) / df['open'].iloc[0]) * 100
         direction_label = "🟢 BULLISH TREND (Markup Phase)" if price_change >= 0 else "🔴 BEARISH TREND (Markdown Phase)"
         
-        # Display Chart Name, Live Market Price & Direction Header
+        # Live Header with Timestamp & Price Movement
         st.subheader(f"📊 Chart: {selected_coin} [{timeframe}] | Live Price: ${live_price:,.2f} | Status: {direction_label}")
         
         # Plotly Candlestick Chart
@@ -141,8 +141,7 @@ with col1:
             name='Candles'
         )])
         
-        # --- SMC Visual Markings (Liquidity & Order Blocks) ---
-        # 1. Liquidity Pools (Buy-side & Sell-side Highs/Lows)
+        # --- SMC Visual Markings ---
         swing_high = df['high'].max()
         swing_low = df['low'].min()
         
@@ -154,25 +153,22 @@ with col1:
                       line=dict(color="#ff9800", width=1.5, dash="dot"))
         fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/2)], y=swing_low, text="⚠️ Sell-Side Liquidity (SSL)", showarrow=False, yshift=-15, font=dict(color="#ff9800"))
 
-        # 2. Render User Trade Setup (Entry, SL, TP)
+        # User Trade Setup (Entry, SL, TP)
         t_label = "LONG" if "LONG" in trade_type else "SHORT"
         entry_color = "rgba(33, 150, 243, 0.3)"
         sl_color = "#f44336"
         tp_color = "#4caf50"
 
-        # Entry Zone Shaded Area
         fig.add_hrect(
             y0=entry_price * 0.998, y1=entry_price * 1.002, 
             fillcolor=entry_color, layer="below", line_width=0,
             annotation_text=f"🎯 {t_label} Entry Zone", annotation_position="top left"
         )
 
-        # Stop Loss Line
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price,
                       line=dict(color=sl_color, width=2, dash="dash"))
         fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text=f"SL: {sl_price}", showarrow=True, arrowhead=1, ax=30, ay=10, bgcolor=sl_color, font=dict(color="white"))
 
-        # Take Profit Line
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_price, y1=tp_price,
                       line=dict(color=tp_color, width=2, dash="dash"))
         fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_price, text=f"TP: {tp_price}", showarrow=True, arrowhead=1, ax=30, ay=-10, bgcolor=tp_color, font=dict(color="white"))
@@ -188,7 +184,7 @@ with col1:
         st.plotly_chart(fig, use_container_width=True)
         
         rrr = abs(tp_price - entry_price) / abs(entry_price - sl_price) if abs(entry_price - sl_price) > 0 else 0
-        st.success(f"📌 **Active Strategy Setup:** {t_label} | Current Live Price: **${live_price:,.2f}** | Risk-to-Reward Ratio (RRR): **1:{rrr:.2f}**")
+        st.success(f"📌 **Active Strategy Setup:** {t_label} | Real-Time Live Price: **${live_price:,.2f}** | RRR: **1:{rrr:.2f}**")
     else:
         st.warning("No market data available for this pair right now.")
 
@@ -201,4 +197,4 @@ with col2:
     st.metric(label="Liquidation Risk", value="Low", delta_color="inverse")
     
     st.divider()
-    st.info("💡 **SMC Legend:**\n* **Orange Dotted Lines:** Key Liquidity Pools (BSL/SSL)\n* **Blue Shaded Area:** Institutional Entry Zone\n* **Red / Green Dashed:** SL & TP Targets")
+    st.info("💡 **Live Feed Active:** App automatically refreshes every 5 seconds to track real-time price movements.")
