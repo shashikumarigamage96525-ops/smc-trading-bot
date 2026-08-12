@@ -19,9 +19,9 @@ def init_exchange():
         'options': {'defaultType': 'spot'}
     })
     ex.urls['api'] = {
-        'public': 'https://data-api.binance.vision/api/v3',
-        'private': 'https://api.binance.com/api/v3',
-    }
+            'public': 'https://api1.binance.com/api/v3',
+            'private': 'https://api1.binance.com/api/v3',
+        }
     return ex
 
 exchange = init_exchange()
