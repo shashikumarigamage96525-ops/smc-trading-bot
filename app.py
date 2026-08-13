@@ -39,7 +39,7 @@ STRATEGIES = {
 }
 
 # 4. Fetch OHLCV Chart Data
-def fetch_chart_data(symbol, timeframe='1h', limit=150): # Limit 150 optimized for mobile screens
+def fetch_chart_data(symbol, timeframe='1h', limit=150):
     try:
         clean_symbol = symbol.replace("/", "")
         url = f"https://api.binance.com/api/v3/klines?symbol={clean_symbol}&interval={timeframe}&limit={limit}"
@@ -86,8 +86,6 @@ def advanced_pattern_recognition(df):
     
     highs = df['high'].values
     lows = df['low'].values
-    closes = df['close'].values
-    times = df['timestamp'].values
     
     supports = []
     resistances = []
@@ -104,6 +102,7 @@ def advanced_pattern_recognition(df):
     
     return supports, resistances, breakouts
 
+# 7. Gatekeeper Checklist Evaluation
 def evaluate_gatekeeper_checklist(symbol):
     return {
         "1. Trend Direction (EMA Structure)": True,
@@ -116,7 +115,7 @@ def evaluate_gatekeeper_checklist(symbol):
 
 # --- UI LAYOUT ---
 st.title("⚡ Mobile Live Trading Terminal")
-st.markdown("Optimized for phone screens with clear candlestick views, S/R levels, and multi-TP setups.")
+st.markdown("Optimized for phone screens with clear candlestick views, S/R levels, multi-TP setups, and Gatekeeper Checklist.")
 
 st.sidebar.header("🎛 Control Hub")
 
@@ -170,6 +169,25 @@ price_risk_per_unit = abs(entry_price - sl_price)
 position_size_units = risk_amount_usd / price_risk_per_unit if price_risk_per_unit > 0 else 0
 
 st.sidebar.info(f"💡 Risk: **${risk_amount_usd:.2f}** | Size: **{position_size_units:,.2f} units**")
+
+# --- GATEKEEPER CHECKLIST SECTION ---
+st.sidebar.divider()
+st.sidebar.subheader("🔒 Professional 6-Step Checklist")
+
+checklist_status = evaluate_gatekeeper_checklist(selected_coin)
+all_passed = True
+for step, passed in checklist_status.items():
+    if passed:
+        st.sidebar.success(f"✅ {step}")
+    else:
+        st.sidebar.error(f"❌ {step}")
+        all_passed = False
+
+st.sidebar.divider()
+if all_passed:
+    st.sidebar.markdown("### 🟢 STATUS: ALL SYSTEMS GO")
+else:
+    st.sidebar.markdown("### 🔴 STATUS: STAND DOWN")
 
 # --- MAIN DASHBOARD AREA ---
 col1, col2 = st.columns([3, 1])
@@ -253,9 +271,9 @@ with col1:
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp3_price, y1=tp3_price, line=dict(color="#00E676", width=2, dash="dot"))
         fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp3_price, text=f"🚀 TP3", showarrow=True, arrowhead=2, ax=-20, ay=-22, bgcolor="#00E676", font=dict(color="black", size=9, family="Arial Black"))
 
-        # Compact Mobile Layout Tuning (Keeps candles large and clear vertically)
+        # Compact Mobile Layout Tuning
         fig.update_layout(
-            height=480, # Compact height to fit phone screens without excessive scrolling
+            height=480,
             template="plotly_dark",
             xaxis_rangeslider_visible=False,
             margin=dict(l=0, r=0, t=5, b=0),
@@ -266,7 +284,6 @@ with col1:
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # Summary footer
         st.success(f"📌 **Strategy:** {selected_strategy_name} | **TP1:** ${tp1_price:,.4f} | **TP2:** ${tp2_price:,.4f} | **TP3:** ${tp3_price:,.4f}")
     else:
         st.warning("Loading data...")
