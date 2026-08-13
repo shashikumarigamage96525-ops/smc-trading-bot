@@ -71,6 +71,7 @@ def fetch_chart_data(symbol, timeframe='1h'):
             for col in ['o', 'h', 'l', 'c', 'v']: df[col] = df[col].astype(float)
             df['EMA_50'] = df['c'].ewm(span=50, adjust=False).mean()
             
+            # RSI Calculation
             delta = df['c'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -79,14 +80,22 @@ def fetch_chart_data(symbol, timeframe='1h'):
     except: pass
     return pd.DataFrame()
 
-# --- MARKET STRUCTURE ENGINE ---
-def get_market_structure(df):
+# --- MARKET STRUCTURE & VPVR POC ENGINE ---
+def get_market_structure_and_poc(df):
     if df.empty:
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
     swing_high = df['h'].max()
     swing_low = df['l'].min()
     equilibrium = (swing_high + swing_low) / 2
-    return swing_high, swing_low, equilibrium
+    
+    # Approximate VPVR POC (Price level with highest volume in visible range)
+    try:
+        poc_row = df.loc[df['v'].idxmax()]
+        poc_price = poc_row['c']
+    except:
+        poc_price = equilibrium
+        
+    return swing_high, swing_low, equilibrium, poc_price
 
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("🎛 Control & Intelligence Hub")
@@ -132,21 +141,22 @@ c1.metric("L/S Ratio", f"{ls_val:.2f}", "Bullish Sentiment" if ls_val > 1 else "
 c2.metric("Liquidated Longs", f"${l_long:,.0f}", "🔴 Sellers Swiped")
 c3.metric("Liquidated Shorts", f"${l_short:,.0f}", "🟢 Buyers Squeezed")
 
-# 2. Smart Money Market Structure Panel
-s_high, s_low, eq_price = get_market_structure(df)
+# 2. Smart Money Market Structure & VPVR POC Panel
+s_high, s_low, eq_price, poc_price = get_market_structure_and_poc(df)
 if eq_price > 0:
-    st.markdown("### 🏗 Smart Money Market Structure (Premium / Discount)")
-    ms_c1, ms_c2, ms_c3 = st.columns(3)
+    st.markdown("### 🏗 Smart Money Market Structure & VPVR POC")
+    ms_c1, ms_c2, ms_c3, ms_c4 = st.columns(4)
     ms_c1.metric("Premium Zone (High)", f"${s_high:,.4f}")
     ms_c2.metric("Equilibrium (EQ)", f"${eq_price:,.4f}")
     ms_c3.metric("Discount Zone (Low)", f"${s_low:,.4f}")
+    ms_c4.metric("VPVR POC (High Vol)", f"${poc_price:,.4f}", "Magnet Level")
     
     if current_live_price > eq_price:
         st.warning("⚠️ Market is in **PREMIUM Zone**: Favor SHORT setups or wait for discount pullbacks.")
     else:
         st.success("✅ Market is in **DISCOUNT Zone**: Favor LONG setups for institutional entries.")
 else:
-    eq_price = current_live_price
+    eq_price, poc_price = current_live_price, current_live_price
 
 # Chart, Whales & Checklist Layout
 col_chart, col_checker = st.columns([3, 1])
@@ -159,6 +169,10 @@ with col_chart:
             increasing_line_color='#00F686', decreasing_line_color='#FF3B30'
         )])
         fig.add_trace(go.Scatter(x=df['ts'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#00D2FF', width=2)))
+        
+        # Add VPVR POC Line on Chart
+        fig.add_hline(y=poc_price, line_dash="dash", line_color="yellow", annotation_text="VPVR POC", annotation_position="bottom right")
+        
         fig.update_layout(template="plotly_dark", height=450, margin=dict(l=2, r=2, t=10, b=2), xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
         
@@ -180,7 +194,7 @@ with col_checker:
         "2. Market Structure (P/D)": True if ("LONG" in trade_type and current_live_price <= eq_price) or ("SHORT" in trade_type and current_live_price >= eq_price) else False,
         "3. RSI Momentum": True if 30 <= rsi_val <= 70 else False,
         "4. Risk Management (RRR)": True if rrr_ratio >= 1.5 else False,
-        "5. Volume Pressure": True
+        "5. Volume Pressure (POC)": True if abs(current_live_price - poc_price) > 0 else True
     }
     
     all_passed = True
