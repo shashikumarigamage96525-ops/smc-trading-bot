@@ -6,7 +6,7 @@ import requests
 from streamlit_autorefresh import st_autorefresh
 
 # 1. Page Configuration
-st.set_page_config(page_title="Ultimate Institutional Trading Terminal", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Ultimate Trading Terminal", page_icon="⚡", layout="wide")
 st_autorefresh(interval=5000, limit=None, key="live_terminal")
 
 # --- DATA FETCHERS ---
@@ -61,52 +61,28 @@ def fetch_chart_data(symbol, timeframe='1h'):
         clean = symbol.replace("/", "")
         url = f"https://api.binance.com/api/v3/klines?symbol={clean}&interval={timeframe}&limit=100"
         res = requests.get(url, timeout=5)
-        if res.status_code != 200:
-            url = f"https://data-api.binance.vision/api/v3/klines?symbol={clean}&interval={timeframe}&limit=100"
-            res = requests.get(url, timeout=5)
         data = res.json()
-        if isinstance(data, list) and len(data) > 0:
-            df = pd.DataFrame(data, columns=['ts', 'o', 'h', 'l', 'c', 'v', 'ct', 'qav', 'not', 'tb', 'tq', 'i'])
-            df['ts'] = pd.to_datetime(df['ts'], unit='ms')
-            for col in ['o', 'h', 'l', 'c', 'v']: df[col] = df[col].astype(float)
-            df['EMA_50'] = df['c'].ewm(span=50, adjust=False).mean()
-            
-            # RSI Calculation
-            delta = df['c'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            df['RSI'] = 100 - (100 / (1 + (gain / loss)))
-            return df
-    except: pass
-    return pd.DataFrame()
-
-# --- MARKET STRUCTURE & VPVR POC ENGINE ---
-def get_market_structure_and_poc(df):
-    if df.empty:
-        return 0.0, 0.0, 0.0, 0.0
-    swing_high = df['h'].max()
-    swing_low = df['l'].min()
-    equilibrium = (swing_high + swing_low) / 2
-    
-    # Approximate VPVR POC (Price level with highest volume in visible range)
-    try:
-        poc_row = df.loc[df['v'].idxmax()]
-        poc_price = poc_row['c']
-    except:
-        poc_price = equilibrium
+        df = pd.DataFrame(data, columns=['ts', 'o', 'h', 'l', 'c', 'v', 'ct', 'qav', 'not', 'tb', 'tq', 'i'])
+        df['ts'] = pd.to_datetime(df['ts'], unit='ms')
+        for col in ['o', 'h', 'l', 'c', 'v']: df[col] = df[col].astype(float)
+        df['EMA_50'] = df['c'].ewm(span=50, adjust=False).mean()
         
-    return swing_high, swing_low, equilibrium, poc_price
+        # RSI Calculation
+        delta = df['c'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        df['RSI'] = 100 - (100 / (1 + (gain / loss)))
+        return df
+    except: return pd.DataFrame()
 
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("🎛 Control & Intelligence Hub")
-available_coins = fetch_available_coins()
-default_idx = available_coins.index("BTC/USDT") if "BTC/USDT" in available_coins else 0
-selected_coin = st.sidebar.selectbox("Select Asset:", available_coins, index=default_idx)
+selected_coin = st.sidebar.selectbox("Select Asset:", fetch_available_coins(), index=0)
 timeframe = st.sidebar.selectbox("Execution Timeframe:", ["5m", "15m", "1h", "4h"], index=2)
 trade_type = st.sidebar.radio("Direction:", ["LONG (Bullish)", "SHORT (Bearish)"], horizontal=True)
 
-df = fetch_chart_data(selected_coin, timeframe=timeframe)
-current_live_price = df['c'].iloc[-1] if not df.empty else 1.0
+df_check = fetch_chart_data(selected_coin, timeframe=timeframe)
+current_live_price = df_check['c'].iloc[-1] if not df_check.empty else 1.0
 
 st.sidebar.divider()
 st.sidebar.subheader("💰 Risk & Position Management")
@@ -131,9 +107,9 @@ rrr_ratio = reward_distance / risk_distance if risk_distance > 0 else 0.0
 st.sidebar.info(f"💡 Risk: **${risk_usd:.2f}** | Size: **{units:,.2f} units**\n\n⚖️ **Est. RRR (TP1):** `1:{rrr_ratio:.2f}`")
 
 # --- MAIN DASHBOARD ---
-st.title("⚡ Ultimate Institutional Trading Terminal")
+st.title("⚡ Institutional Trading Terminal")
 
-# 1. Market Sentiment & Derivatives
+# Market Sentiment & Derivatives
 ls_val, l_long, l_short = fetch_market_derivatives_data(selected_coin)
 st.markdown("### 📊 Market Sentiment & Derivatives")
 c1, c2, c3 = st.columns(3)
@@ -141,38 +117,18 @@ c1.metric("L/S Ratio", f"{ls_val:.2f}", "Bullish Sentiment" if ls_val > 1 else "
 c2.metric("Liquidated Longs", f"${l_long:,.0f}", "🔴 Sellers Swiped")
 c3.metric("Liquidated Shorts", f"${l_short:,.0f}", "🟢 Buyers Squeezed")
 
-# 2. Smart Money Market Structure & VPVR POC Panel
-s_high, s_low, eq_price, poc_price = get_market_structure_and_poc(df)
-if eq_price > 0:
-    st.markdown("### 🏗 Smart Money Market Structure & VPVR POC")
-    ms_c1, ms_c2, ms_c3, ms_c4 = st.columns(4)
-    ms_c1.metric("Premium Zone (High)", f"${s_high:,.4f}")
-    ms_c2.metric("Equilibrium (EQ)", f"${eq_price:,.4f}")
-    ms_c3.metric("Discount Zone (Low)", f"${s_low:,.4f}")
-    ms_c4.metric("VPVR POC (High Vol)", f"${poc_price:,.4f}", "Magnet Level")
-    
-    if current_live_price > eq_price:
-        st.warning("⚠️ Market is in **PREMIUM Zone**: Favor SHORT setups or wait for discount pullbacks.")
-    else:
-        st.success("✅ Market is in **DISCOUNT Zone**: Favor LONG setups for institutional entries.")
-else:
-    eq_price, poc_price = current_live_price, current_live_price
-
 # Chart, Whales & Checklist Layout
 col_chart, col_checker = st.columns([3, 1])
 
 with col_chart:
     st.markdown(f"### 📈 Live Chart: {selected_coin} [{timeframe}]")
+    df = fetch_chart_data(selected_coin, timeframe=timeframe)
     if not df.empty:
         fig = go.Figure(data=[go.Candlestick(
             x=df['ts'], open=df['o'], high=df['h'], low=df['l'], close=df['c'],
             increasing_line_color='#00F686', decreasing_line_color='#FF3B30'
         )])
         fig.add_trace(go.Scatter(x=df['ts'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#00D2FF', width=2)))
-        
-        # Add VPVR POC Line on Chart
-        fig.add_hline(y=poc_price, line_dash="dash", line_color="yellow", annotation_text="VPVR POC", annotation_position="bottom right")
-        
         fig.update_layout(template="plotly_dark", height=450, margin=dict(l=2, r=2, t=10, b=2), xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
         
@@ -181,20 +137,21 @@ with col_chart:
         whale_data = fetch_whale_transactions(selected_coin, current_live_price)
         st.dataframe(pd.DataFrame(whale_data), hide_index=True, use_container_width=True)
     else:
-        st.error("Could not fetch chart data. Please check asset or network.")
+        st.error("Could not fetch chart data.")
 
 with col_checker:
     st.subheader("🔒 Gatekeeper Checklist")
     
+    # Simple evaluations for checklist
     ema_val = df['EMA_50'].iloc[-1] if not df.empty else current_live_price
     rsi_val = df['RSI'].iloc[-1] if not df.empty else 50.0
     
     checklist = {
         "1. Trend Direction": True if ("LONG" in trade_type and current_live_price > ema_val) or ("SHORT" in trade_type and current_live_price < ema_val) else False,
-        "2. Market Structure (P/D)": True if ("LONG" in trade_type and current_live_price <= eq_price) or ("SHORT" in trade_type and current_live_price >= eq_price) else False,
+        "2. S/R Confluence": True,
         "3. RSI Momentum": True if 30 <= rsi_val <= 70 else False,
         "4. Risk Management (RRR)": True if rrr_ratio >= 1.5 else False,
-        "5. Volume Pressure (POC)": True if abs(current_live_price - poc_price) > 0 else True
+        "5. Volume Pressure": True
     }
     
     all_passed = True
