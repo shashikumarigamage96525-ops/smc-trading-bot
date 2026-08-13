@@ -558,23 +558,25 @@ with col1:
 
             t_label = "LONG" if "LONG" in trade_type else "SHORT"
             
-            fig.add_hrect(
-                y0=entry_price*0.998, y1=entry_price*1.002, 
-                fillcolor="rgba(0, 210, 255, 0.25)", line_width=1, line_color="#00D2FF",
-                annotation_text=f"🎯 {t_label} ENTRY", annotation_position="bottom left",
-                annotation_font=dict(color="#00D2FF", size=9, family="Arial Black")
-            )
+            # --- GUIDANCE LINES FOR ENTRY, SL, AND TP TARGETS ---
+            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=entry_price, y1=entry_price, line=dict(color="#00D2FF", width=2, dash="solid"))
+            fig.add_annotation(x=df['timestamp'].iloc[-1], y=entry_price, text=f"🎯 {t_label} ENTRY: ${entry_price:,.4f}", showarrow=True, arrowhead=2, ax=-40, ay=-10, bgcolor="#00D2FF", font=dict(color="black", size=10, family="Arial Black"))
             
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF3B30", width=2, dash="dot"))
-            fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text="🛑 SL" + (" (Trailed)" if enable_trailing else ""), showarrow=True, arrowhead=2, ax=-25, ay=15, bgcolor="#FF3B30", font=dict(color="white", size=9, family="Arial Black"))
+            fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text=f"🛑 STOP LOSS: ${sl_price:,.4f}" + (" (Trailed)" if enable_trailing else ""), showarrow=True, arrowhead=2, ax=-40, ay=15, bgcolor="#FF3B30", font=dict(color="white", size=10, family="Arial Black"))
 
-            tp_offsets = [-15, -30, -45]
-            for idx, (tp_val, tp_color, ay_val) in enumerate(zip([tp1_price, tp2_price, tp3_price], ["#00E676", "#00C853", "#00B0FF"], tp_offsets), 1):
-                fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_val, y1=tp_val, line=dict(color=tp_color, width=2, dash="dot"))
-                fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_val, text=f"🎯 TP{idx}", showarrow=True, arrowhead=2, ax=-25, ay=ay_val, bgcolor=tp_color, font=dict(color="black" if idx<3 else "white", size=9, family="Arial Black"))
+            tp_configs = [
+                (tp1_price, "TP1", "#00E676", -25),
+                (tp2_price, "TP2", "#00C853", -40),
+                (tp3_price, "TP3", "#00B0FF", -55)
+            ]
+            
+            for tp_val, tp_name, tp_color, ay_val in tp_configs:
+                fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_val, y1=tp_val, line=dict(color=tp_color, width=2, dash="dash"))
+                fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_val, text=f"🎯 {tp_name}: ${tp_val:,.4f}", showarrow=True, arrowhead=2, ax=-40, ay=ay_val, bgcolor=tp_color, font=dict(color="black" if tp_name!="TP3" else "white", size=10, family="Arial Black"))
 
             fig.update_layout(
-                height=550, template="plotly_dark", xaxis_rangeslider_visible=False,
+                height=580, template="plotly_dark", xaxis_rangeslider_visible=False,
                 margin=dict(l=2, r=2, t=10, b=2), 
                 yaxis=dict(side="right", gridcolor="#222222"), 
                 xaxis=dict(gridcolor="#222222"),
