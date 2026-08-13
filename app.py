@@ -85,7 +85,7 @@ def fetch_order_book_metrics(symbol):
     except:
         return 50.0, 50.0
 
-# 6. Indicators, S/R, Breakouts & FVG Engine
+# 6. Indicators, S/R, Breakouts & Smart FVG Engine (Trend-Aware Filtering)
 def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
@@ -125,25 +125,43 @@ def calculate_advanced_metrics(df):
             if closes[i] < last_sup and closes[i-1] >= last_sup:
                 breakouts.append({'time': times[i], 'price': closes[i], 'type': 'Bearish Breakdown'})
 
-    # FVG Detection (Filter to keep only the most recent 2 to avoid cluttering)
-    fvg_list = []
+    # Gather all Fvgs
+    bullish_fvgs = []
+    bearish_fvgs = []
+    
     for i in range(1, len(df) - 1):
         if df['low'].iloc[i+1] > df['high'].iloc[i-1]:
-            fvg_list.append({
+            bullish_fvgs.append({
                 'type': 'Bullish FVG', 
                 'low': df['high'].iloc[i-1], 
                 'high': df['low'].iloc[i+1], 
                 'time': df['timestamp'].iloc[i]
             })
         elif df['high'].iloc[i+1] < df['low'].iloc[i-1]:
-            fvg_list.append({
+            bearish_fvgs.append({
                 'type': 'Bearish FVG', 
                 'low': df['high'].iloc[i+1], 
                 'high': df['low'].iloc[i-1], 
                 'time': df['timestamp'].iloc[i]
             })
             
-    return df, supports, resistances, breakouts, fvg_list[-2:] if len(fvg_list) >= 2 else fvg_list
+    # Determine Trend based on EMA 50 & Price
+    current_price = closes[-1]
+    current_ema50 = df['EMA_50'].iloc[-1]
+    
+    # Automatically select the relevant FVG type based on current market trend context
+    selected_fvg = []
+    if current_price >= current_ema50 and bullish_fvgs:
+        selected_fvg = [bullish_fvgs[-1]] # Show latest Bullish FVG if in Bullish context
+    elif current_price < current_ema50 and bearish_fvgs:
+        selected_fvg = [bearish_fvgs[-1]] # Show latest Bearish FVG if in Bearish context
+    else:
+        # Fallback to absolute latest if any exists
+        all_fvgs = bullish_fvgs + bearish_fvgs
+        if all_fvgs:
+            selected_fvg = [all_fvgs[-1]]
+            
+    return df, supports, resistances, breakouts, selected_fvg
 
 # 7. Gatekeeper Checklist Evaluation Function
 def evaluate_gatekeeper_checklist(symbol, live_price, ema_50, rsi_val):
@@ -240,7 +258,7 @@ with col1:
         sc3.metric("4H Trend", higher_trend)
         sc4.metric("Confidence Score", f"{score}%", "A+ Grade" if score >= 75 else "Moderate")
 
-        st.subheader(f"📊 Clean Live Chart: {selected_coin} [{timeframe}]")
+        st.subheader(f"📊 Smart Trend-Aware Chart: {selected_coin} [{timeframe}]")
         
         fig = go.Figure(data=[go.Candlestick(
             x=df['timestamp'], open=df['open'], high=df['high'], low=df['low'], close=df['close'],
@@ -267,19 +285,19 @@ with col1:
         for b in breakouts:
             fig.add_annotation(x=b['time'], y=b['price'], text=f"⚡ {b['type']}", showarrow=True, arrowhead=2, ax=0, ay=-35, bgcolor="#FFCC00", font=dict(color="black", size=9, family="Arial Black"))
 
-        # --- CLEAN UNCLUTTERED FVG ZONES ---
+        # --- AUTOMATIC TREND-AWARE SINGLE FVG ZONE ---
         for fvg in fvgs:
-            fvg_color = "rgba(0, 230, 118, 0.20)" if fvg['type'] == 'Bullish FVG' else "rgba(255, 23, 68, 0.20)"
+            fvg_color = "rgba(0, 230, 118, 0.25)" if fvg['type'] == 'Bullish FVG' else "rgba(255, 23, 68, 0.25)"
             line_color = "#00E676" if fvg['type'] == 'Bullish FVG' else "#FF1744"
             
             fig.add_hrect(
                 y0=fvg['low'], y1=fvg['high'],
-                fillcolor=fvg_color, line_width=1, line_dash="dot", line_color=line_color,
-                annotation_text=f"✨ {fvg['type']}", annotation_position="top left",
+                fillcolor=fvg_color, line_width=1.5, line_dash="dot", line_color=line_color,
+                annotation_text=f"✨ Active {fvg['type']}", annotation_position="top left",
                 annotation_font=dict(color=line_color, size=9, family="Arial Black")
             )
 
-        # Trade Setup: Entry, SL, TP1, TP2, TP3 (Spaced out annotations to prevent overlap)
+        # Trade Setup: Entry, SL, TP1, TP2, TP3
         t_label = "LONG" if "LONG" in trade_type else "SHORT"
         
         fig.add_hrect(
@@ -292,7 +310,6 @@ with col1:
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF3B30", width=2, dash="dot"))
         fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text="🛑 SL", showarrow=True, arrowhead=2, ax=-25, ay=15, bgcolor="#FF3B30", font=dict(color="white", size=9, family="Arial Black"))
 
-        # Spread TP annotations safely
         tp_offsets = [-15, -30, -45]
         for idx, (tp_val, tp_color, ay_val) in enumerate(zip([tp1_price, tp2_price, tp3_price], ["#00E676", "#00C853", "#00B0FF"], tp_offsets), 1):
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_val, y1=tp_val, line=dict(color=tp_color, width=2, dash="dot"))
