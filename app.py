@@ -281,7 +281,7 @@ with col1:
         for b in breakouts:
             fig.add_annotation(x=b['time'], y=b['price'], text=f"⚡ {b['type']}", showarrow=True, arrowhead=2, ax=0, ay=-35, bgcolor="#FFCC00", font=dict(color="black", size=9, family="Arial Black"))
 
-        # --- AUTOMATIC TREND-AWARE SINGLE FVG ZONE ---
+        # --- AUTOMATIC TREND-AWARE SINGLE FVG ZONE (WITH PRICES) ---
         for fvg in fvgs:
             fvg_color = "rgba(0, 230, 118, 0.25)" if fvg['type'] == 'Bullish FVG' else "rgba(255, 23, 68, 0.25)"
             line_color = "#00E676" if fvg['type'] == 'Bullish FVG' else "#FF1744"
@@ -289,7 +289,8 @@ with col1:
             fig.add_hrect(
                 y0=fvg['low'], y1=fvg['high'],
                 fillcolor=fvg_color, line_width=1.5, line_dash="dot", line_color=line_color,
-                annotation_text=f"✨ Active {fvg['type']}", annotation_position="top left",
+                annotation_text=f"✨ Active {fvg['type']} (${fvg['low']:,.4f} - ${fvg['high']:,.4f})", 
+                annotation_position="top left",
                 annotation_font=dict(color=line_color, size=9, family="Arial Black")
             )
 
@@ -320,10 +321,12 @@ with col1:
         )
         st.plotly_chart(fig, use_container_width=True)
         
-        # --- NEW: CHART LEGEND & LIVE PRICE GUIDE (CHART DETAILS) ---
+        # --- CHART LEGEND & LIVE PRICE GUIDE (UPDATED WITH FVG RANGE) ---
         st.markdown("### 🗺️ Chart Line Guide & Live Price Levels")
         
         guide_col1, guide_col2, guide_col3 = st.columns(3)
+        
+        fvg_text = f"✨ {fvgs[0]['type']}: `${fvgs[0]['low']:,.4f}` - `${fvgs[0]['high']:,.4f}`" if fvgs else "✨ **Active FVG:** None"
         
         with guide_col1:
             st.markdown(f"🟢 **Support Line:** `${supports[0]:,.4f}`" if supports else "🟢 **Support:** N/A")
@@ -336,7 +339,7 @@ with col1:
             st.markdown(f"🛑 **Stop Loss (SL):** `${sl_price:,.4f}`")
             
         with guide_col3:
-            st.markdown(f"✨ **Active FVG Zone:** {fvgs[0]['type'] if fvgs else 'None'}")
+            st.markdown(fvg_text)
             st.markdown(f"🎯 **TP 1 / TP 2 / TP 3:** `${tp1_price:,.4f}` / `${tp2_price:,.4f}` / `${tp3_price:,.4f}`")
             st.markdown(f"⚡ **Current Live Price:** `${live_price:,.4f}`")
 
