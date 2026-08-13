@@ -93,14 +93,11 @@ def detect_candle_patterns(df):
     curr_o, curr_c, curr_h, curr_l = df['open'].iloc[-1], df['close'].iloc[-1], df['high'].iloc[-1], df['low'].iloc[-1]
     prev_o, prev_c = df['open'].iloc[-2], df['close'].iloc[-2]
     
-    # Bullish Engulfing
     if curr_c > curr_o and prev_c < prev_o and curr_c >= prev_o and curr_o <= prev_c:
         return "Bullish Engulfing 🟢"
-    # Bearish Engulfing
     elif curr_c < curr_o and prev_c > prev_o and curr_c <= prev_o and curr_o >= prev_c:
         return "Bearish Engulfing 🔴"
     
-    # Pin Bar / Hammer detection
     body = abs(curr_c - curr_o)
     total_range = curr_h - curr_l
     if total_range > 0:
@@ -232,6 +229,10 @@ st.sidebar.subheader("💰 Risk & Position Management")
 account_balance = st.sidebar.number_input("Account Balance ($):", value=10000.0, step=500.0)
 risk_percentage = st.sidebar.slider("Risk Per Trade (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
 
+# --- NEW: Trailing SL Options ---
+enable_trailing = st.sidebar.checkbox("Activate Trailing SL Advisor")
+trailing_offset_pct = st.sidebar.slider("Trailing Buffer (%):", min_value=0.2, max_value=2.0, value=0.5, step=0.1)
+
 st.sidebar.divider()
 st.sidebar.subheader("📈 Trade Configuration & Targets")
 trade_type = st.sidebar.radio("Direction:", ["LONG (Bullish)", "SHORT (Bearish)"], horizontal=True)
@@ -250,6 +251,17 @@ sl_price = st.sidebar.number_input("Stop Loss (SL):", value=float(st.session_sta
 tp1_price = st.sidebar.number_input("Take Profit 1 (TP1):", value=float(st.session_state['tp1']), format="%.4f", step=p_step)
 tp2_price = st.sidebar.number_input("Take Profit 2 (TP2):", value=float(st.session_state['tp2']), format="%.4f", step=p_step)
 tp3_price = st.sidebar.number_input("Take Profit 3 (TP3):", value=float(st.session_state['tp3']), format="%.4f", step=p_step)
+
+# Adjust SL if Trailing is active based on current live price movement
+if enable_trailing:
+    if "LONG" in trade_type and current_live_price > entry_price:
+        suggested_trail_sl = current_live_price * (1 - trailing_offset_pct / 100.0)
+        if suggested_trail_sl > sl_price:
+            sl_price = suggested_trail_sl
+    elif "SHORT" in trade_type and current_live_price < entry_price:
+        suggested_trail_sl = current_live_price * (1 + trailing_offset_pct / 100.0)
+        if suggested_trail_sl < sl_price:
+            sl_price = suggested_trail_sl
 
 risk_usd = account_balance * (risk_percentage / 100.0)
 units = risk_usd / abs(entry_price - sl_price) if abs(entry_price - sl_price) > 0 else 0
@@ -284,15 +296,21 @@ with col1:
         ema_200 = df['EMA_200'].iloc[-1]
         candle_pattern = detect_candle_patterns(df)
         
-        df_higher = fetch_chart_data(selected_coin, timeframe='4h', limit=50)
-        higher_trend = "BULLISH" if not df_higher.empty and df_higher['close'].iloc[-1] > df_higher['close'].ewm(span=50).mean().iloc[-1] else "BEARISH"
+        # --- NEW: Multi-Timeframe Confluence Fetcher ---
+        df_15m = fetch_chart_data(selected_coin, timeframe='15m', limit=50)
+        df_1h = fetch_chart_data(selected_coin, timeframe='1h', limit=50)
+        df_4h = fetch_chart_data(selected_coin, timeframe='4h', limit=50)
+        
+        trend_15m = "BULLISH 🟢" if not df_15m.empty and df_15m['close'].iloc[-1] > df_15m['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
+        trend_1h = "BULLISH 🟢" if not df_1h.empty and df_1h['close'].iloc[-1] > df_1h['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
+        trend_4h = "BULLISH 🟢" if not df_4h.empty and df_4h['close'].iloc[-1] > df_4h['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
         
         score = 0
         if "LONG" in trade_type and live_price > ema_50: score += 20
         if "SHORT" in trade_type and live_price < ema_50: score += 20
         if "LONG" in trade_type and bid_p > 50: score += 20
         if "SHORT" in trade_type and ask_p > 50: score += 20
-        if ("LONG" in trade_type and higher_trend == "BULLISH") or ("SHORT" in trade_type and higher_trend == "BEARISH"): score += 20
+        if ("LONG" in trade_type and "BULLISH" in trend_4h) or ("SHORT" in trade_type and "BEARISH" in trend_4h): score += 20
         if 30 < rsi_val < 70: score += 20
         if ("LONG" in trade_type and "Bullish" in candle_pattern) or ("SHORT" in trade_type and "Bearish" in candle_pattern): score += 20
         score = min(score, 100)
@@ -302,6 +320,13 @@ with col1:
         sc2.metric("RSI (14)", f"{rsi_val:.1f}")
         sc3.metric("Candle Pattern", candle_pattern)
         sc4.metric("Confidence Score", f"{score}%", "A+ Grade" if score >= 75 else "Moderate")
+
+        # --- NEW: Multi-Timeframe Confluence Dashboard Box ---
+        st.markdown("### 🌐 Multi-Timeframe Trend Confluence Matrix")
+        mtf_c1, mtf_c2, mtf_c3 = st.columns(3)
+        mtf_c1.metric("15m Trend (Execution)", trend_15m)
+        mtf_c2.metric("1h Trend (Structure)", trend_1h)
+        mtf_c3.metric("4h Trend (Macro Direction)", trend_4h)
 
         st.subheader(f"📊 Smart Trend-Aware Chart: {selected_coin} [{timeframe}]")
         
@@ -354,7 +379,7 @@ with col1:
         )
         
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF3B30", width=2, dash="dot"))
-        fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text="🛑 SL", showarrow=True, arrowhead=2, ax=-25, ay=15, bgcolor="#FF3B30", font=dict(color="white", size=9, family="Arial Black"))
+        fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text="🛑 SL" + (" (Trailed)" if enable_trailing else ""), showarrow=True, arrowhead=2, ax=-25, ay=15, bgcolor="#FF3B30", font=dict(color="white", size=9, family="Arial Black"))
 
         tp_offsets = [-15, -30, -45]
         for idx, (tp_val, tp_color, ay_val) in enumerate(zip([tp1_price, tp2_price, tp3_price], ["#00E676", "#00C853", "#00B0FF"], tp_offsets), 1):
