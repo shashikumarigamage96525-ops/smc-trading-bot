@@ -340,3 +340,13 @@ with col2:
     
     st.divider()
     st.info("💡 **Pro Tip:** Use 'Auto-Generate S&R Signal' mode to let the engine calculate optimal support/resistance entry levels with built-in risk management automatically.")
+# app.py එකේ උඩින්ම තියෙන STRATEGIES එක මෙන්න මේ විදියට update කරගන්න:
+STRATEGIES = {
+    "1. Liquidity Sweep + Reversal": "Wick rejection on S&R. Entry on reversal candle.",
+    "2. Break & Retest + Order Block": "Breakout -> Retest at OB -> Continue.",
+    "3. EMA 50/200 Trend Follow": "Trend-following with EMA 50/200. Entry on pullback.",
+    "4. Funding + OI Divergence": "Counter-trend on Funding extreme + OI drop.",
+    "5. VWAP Reversion": "Scalping strategy based on price mean reversion to VWAP.",
+    "6. Market Structure Shift (MSS)": "Identifying trend change via liquidity sweep + MSS."
+}
+
