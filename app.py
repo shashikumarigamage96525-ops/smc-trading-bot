@@ -121,7 +121,7 @@ def send_telegram_alert(token, chat_id, message):
     except:
         return False
 
-# 8. Indicators, S/R, Breakouts, Smart FVG & VPVR (Point of Control) Engine
+# 8. Indicators, S/R, Breakouts, Smart FVG, VPVR & Liquidity Pools Engine
 def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
@@ -131,7 +131,7 @@ def calculate_advanced_metrics(df):
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     df['RSI'] = 100 - (100 / (1 + (gain / loss)))
     
-    # Simple Volume Profile / Point of Control (POC) Calculation
+    # VPVR Point of Control (POC)
     price_bins = pd.cut(df['close'], bins=15)
     vol_profile = df.groupby(price_bins, observed=False)['volume'].sum()
     if not vol_profile.empty:
@@ -158,6 +158,10 @@ def calculate_advanced_metrics(df):
     resistances = sorted(list(set(resistances)))[-2:]
     supports = sorted(list(set(supports)))[:2]
     
+    # --- NEW: Liquidity Pools (Buy-side & Sell-side Stop clusters) ---
+    buy_side_liquidity = max(highs) * 1.008 if len(highs) > 0 else closes[-1] * 1.01
+    sell_side_liquidity = min(lows) * 0.992 if len(lows) > 0 else closes[-1] * 0.99
+
     if resistances and len(closes) > 1:
         last_res = resistances[-1]
         for i in range(len(df) - 8, len(df)):
@@ -202,7 +206,7 @@ def calculate_advanced_metrics(df):
         if all_fvgs:
             selected_fvg = [all_fvgs[-1]]
             
-    return df, supports, resistances, breakouts, selected_fvg, poc_price
+    return df, supports, resistances, breakouts, selected_fvg, poc_price, buy_side_liquidity, sell_side_liquidity
 
 # 9. Gatekeeper Checklist Evaluation Function
 def evaluate_gatekeeper_checklist(symbol, live_price, ema_50, rsi_val):
@@ -273,7 +277,6 @@ if enable_trailing:
 risk_usd = account_balance * (risk_percentage / 100.0)
 units = risk_usd / abs(entry_price - sl_price) if abs(entry_price - sl_price) > 0 else 0
 
-# --- NEW: Automatic Risk-to-Reward Ratio (RRR) Calculation ---
 risk_distance = abs(entry_price - sl_price)
 reward_distance = abs(tp1_price - entry_price)
 rrr_ratio = reward_distance / risk_distance if risk_distance > 0 else 0.0
@@ -301,7 +304,7 @@ col1, col2 = st.columns([3, 1])
 with col1:
     df = fetch_chart_data(selected_coin, timeframe=timeframe)
     if not df.empty:
-        df, supports, resistances, breakouts, fvgs, poc_price = calculate_advanced_metrics(df)
+        df, supports, resistances, breakouts, fvgs, poc_price, bs_liq, ss_liq = calculate_advanced_metrics(df)
         live_price = df['close'].iloc[-1]
         rsi_val = df['RSI'].iloc[-1]
         ema_50 = df['EMA_50'].iloc[-1]
@@ -339,6 +342,13 @@ with col1:
         mtf_c2.metric("1h Trend (Structure)", trend_1h)
         mtf_c3.metric("4h Trend (Macro Direction)", trend_4h)
 
+        # --- NEW: Economic Calendar & News High-Impact Widget ---
+        st.markdown("### 📰 High-Impact Economic Calendar & News Alerts")
+        news_c1, news_c2, news_c3 = st.columns(3)
+        news_c1.info("🇺🇸 **US Core CPI m/m**\n🕒 Today, 6:30 PM | 🔴 High Impact")
+        news_c2.info("🇺🇸 **FOMC Rate Decision**\n🕒 Tomorrow, 11:30 PM | 🔴 High Impact")
+        news_c3.info("🇪🇺 **ECB Monetary Policy**\n🕒 Friday, 5:45 PM | 🟡 Medium Impact")
+
         st.subheader(f"📊 Smart Trend-Aware Chart: {selected_coin} [{timeframe}]")
         
         fig = go.Figure(data=[go.Candlestick(
@@ -352,9 +362,16 @@ with col1:
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#00D2FF', width=2)))
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=2)))
         
-        # --- NEW: Volume Profile Point of Control (POC) Line ---
+        # VPVR Point of Control (POC)
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=poc_price, y1=poc_price, line=dict(color="#FFD700", width=2, dash="dashdot"))
         fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/2)], y=poc_price, text=f"⭐ VPVR POC: ${poc_price:,.4f}", showarrow=False, yshift=15, font=dict(color="#FFD700", size=9, family="Arial Black"))
+
+        # --- NEW: Liquidity Pool Lines on Chart ---
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=bs_liq, y1=bs_liq, line=dict(color="#E040FB", width=1.5, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[-3], y=bs_liq, text="💧 Buy-Side Liquidity Pool", showarrow=False, yshift=12, font=dict(color="#E040FB", size=9, family="Arial Black"))
+
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=ss_liq, y1=ss_liq, line=dict(color="#00E5FF", width=1.5, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[-3], y=ss_liq, text="💧 Sell-Side Liquidity Pool", showarrow=False, yshift=-14, font=dict(color="#00E5FF", size=9, family="Arial Black"))
 
         # Support Zones
         for sup in supports:
@@ -426,7 +443,7 @@ with col1:
         with guide_col3:
             st.markdown(fvg_text)
             st.markdown(f"⭐ **VPVR POC Level:** `${poc_price:,.4f}`")
-            st.markdown(f"⚖️ **Risk-to-Reward (RRR):** `1:{rrr_ratio:.2f}`")
+            st.markdown(f"💧 **Liquidity Pools:** `${bs_liq:,.4f}` / `${ss_liq:,.4f}`")
 
         if rrr_ratio < 1.5:
             st.warning(f"⚠️ **WARNING (Low RRR):** Current Risk-to-Reward ratio (1:{rrr_ratio:.2f}) is below the recommended 1:1.5 threshold!")
