@@ -85,7 +85,7 @@ def fetch_order_book_metrics(symbol):
     except:
         return 50.0, 50.0
 
-# 6. Indicators, S/R, Breakouts & Smart FVG Engine (Trend-Aware Filtering)
+# 6. Indicators, S/R, Breakouts & Smart FVG Engine
 def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
@@ -320,6 +320,26 @@ with col1:
         )
         st.plotly_chart(fig, use_container_width=True)
         
+        # --- NEW: CHART LEGEND & LIVE PRICE GUIDE (CHART DETAILS) ---
+        st.markdown("### 🗺️ Chart Line Guide & Live Price Levels")
+        
+        guide_col1, guide_col2, guide_col3 = st.columns(3)
+        
+        with guide_col1:
+            st.markdown(f"🟢 **Support Line:** `${supports[0]:,.4f}`" if supports else "🟢 **Support:** N/A")
+            st.markdown(f"🔵 **EMA 50 Line:** `${ema_50:,.4f}`")
+            st.markdown(f"🎯 **Entry Price:** `${entry_price:,.4f}`")
+            
+        with guide_col2:
+            st.markdown(f"🔴 **Resistance Line:** `${resistances[-1]:,.4f}`" if resistances else "🔴 **Resistance:** N/A")
+            st.markdown(f"🟠 **EMA 200 Line:** `${ema_200:,.4f}`")
+            st.markdown(f"🛑 **Stop Loss (SL):** `${sl_price:,.4f}`")
+            
+        with guide_col3:
+            st.markdown(f"✨ **Active FVG Zone:** {fvgs[0]['type'] if fvgs else 'None'}")
+            st.markdown(f"🎯 **TP 1 / TP 2 / TP 3:** `${tp1_price:,.4f}` / `${tp2_price:,.4f}` / `${tp3_price:,.4f}`")
+            st.markdown(f"⚡ **Current Live Price:** `${live_price:,.4f}`")
+
         if score >= 75:
             st.success(f"🚀 **HIGH CONFIDENCE SETUP ({score}%):** Strong confluence for execution!")
         else:
