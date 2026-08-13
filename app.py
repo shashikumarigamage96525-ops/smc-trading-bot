@@ -15,7 +15,7 @@ st.set_page_config(
 # Auto-refresh every 5 seconds for live price movement
 count = st_autorefresh(interval=5000, limit=None, key="live_terminal_counter")
 
-# 2. Robust Coin Fetcher with Mega Fallback List (No 'No Results' Issue)
+# 2. Robust Coin Fetcher with Fallback List
 @st.cache_data(ttl=3600)
 def fetch_available_coins():
     try:
@@ -30,7 +30,6 @@ def fetch_available_coins():
     except:
         pass
     
-    # Fallback List (ACE, RENDER, SUI ඇතුළු ජනප්‍රිය Altcoins සියල්ල මෙහි ඇත)
     return sorted([
         "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", 
         "ADA/USDT", "DOGE/USDT", "SUI/USDT", "PEPE/USDT", "ACE/USDT",
@@ -86,7 +85,7 @@ def fetch_order_book_metrics(symbol):
     except:
         return 50.0, 50.0
 
-# 6. Indicators, S/R, Breakouts & FVG Engine
+# 6. Indicators, S/R, Breakouts & FVG Engine (Detailed FVG Zones)
 def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
@@ -126,12 +125,23 @@ def calculate_advanced_metrics(df):
             if closes[i] < last_sup and closes[i-1] >= last_sup:
                 breakouts.append({'time': times[i], 'price': closes[i], 'type': 'Bearish Breakdown'})
 
+    # Enhanced FVG with Upper & Lower bounds for clear zone plotting
     fvg_list = []
     for i in range(1, len(df) - 1):
         if df['low'].iloc[i+1] > df['high'].iloc[i-1]:
-            fvg_list.append({'type': 'Bullish FVG', 'price': (df['low'].iloc[i+1] + df['high'].iloc[i-1]) / 2, 'time': df['timestamp'].iloc[i]})
+            fvg_list.append({
+                'type': 'Bullish FVG', 
+                'low': df['high'].iloc[i-1], 
+                'high': df['low'].iloc[i+1], 
+                'time': df['timestamp'].iloc[i]
+            })
         elif df['high'].iloc[i+1] < df['low'].iloc[i-1]:
-            fvg_list.append({'type': 'Bearish FVG', 'price': (df['high'].iloc[i+1] + df['low'].iloc[i-1]) / 2, 'time': df['timestamp'].iloc[i]})
+            fvg_list.append({
+                'type': 'Bearish FVG', 
+                'low': df['high'].iloc[i+1], 
+                'high': df['low'].iloc[i-1], 
+                'time': df['timestamp'].iloc[i]
+            })
             
     return df, supports, resistances, breakouts, fvg_list
 
@@ -239,24 +249,38 @@ with col1:
             name='Candles'
         )])
         
+        # EMAs
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#00D2FF', width=2)))
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=2)))
         
+        # Support Zones
         for sup in supports:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=2, dash="dash"))
             fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=sup, text=f"SUPPORT: ${sup:,.4f}", showarrow=False, yshift=-12, font=dict(color="#00C853", size=10, family="Arial Black"))
 
+        # Resistance Zones
         for res in resistances:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=2, dash="dash"))
             fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=res, text=f"RESISTANCE: ${res:,.4f}", showarrow=False, yshift=14, font=dict(color="#D50000", size=10, family="Arial Black"))
 
+        # Breakouts
         for b in breakouts:
             fig.add_annotation(x=b['time'], y=b['price'], text=f"⚡ {b['type']}", showarrow=True, arrowhead=2, ax=0, ay=-35, bgcolor="#FFCC00", font=dict(color="black", size=10, family="Arial Black"))
 
-        for fvg in fvgs[-2:]:
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=fvg['price'], y1=fvg['price'], line=dict(color="#9C27B0", width=1.5, dash="dot"))
-            fig.add_annotation(x=fvg['time'], y=fvg['price'], text=f"✨ {fvg['type']}", showarrow=False, font=dict(color="#9C27B0", size=9))
+        # --- CLEAR FVG ZONES (Highlighted Boxes & Text) ---
+        for fvg in fvgs[-3:]:
+            fvg_color = "rgba(0, 230, 118, 0.25)" if fvg['type'] == 'Bullish FVG' else "rgba(255, 23, 68, 0.25)"
+            line_color = "#00E676" if fvg['type'] == 'Bullish FVG' else "#FF1744"
+            
+            # FVG Box Range
+            fig.add_hrect(
+                y0=fvg['low'], y1=fvg['high'],
+                fillcolor=fvg_color, line_width=1.5, line_dash="dot", line_color=line_color,
+                annotation_text=f"✨ {fvg['type']}", annotation_position="right",
+                annotation_font=dict(color=line_color, size=9, family="Arial Black")
+            )
 
+        # Trade Setup: Entry, SL, TP1, TP2, TP3
         t_label = "LONG" if "LONG" in trade_type else "SHORT"
         
         fig.add_hrect(
