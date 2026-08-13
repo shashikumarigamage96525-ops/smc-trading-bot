@@ -121,7 +121,7 @@ def send_telegram_alert(token, chat_id, message):
     except:
         return False
 
-# 8. Indicators, S/R, Breakouts & Smart FVG Engine
+# 8. Indicators, S/R, Breakouts, Smart FVG & VPVR (Point of Control) Engine
 def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
@@ -131,6 +131,15 @@ def calculate_advanced_metrics(df):
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     df['RSI'] = 100 - (100 / (1 + (gain / loss)))
     
+    # Simple Volume Profile / Point of Control (POC) Calculation
+    price_bins = pd.cut(df['close'], bins=15)
+    vol_profile = df.groupby(price_bins, observed=False)['volume'].sum()
+    if not vol_profile.empty:
+        poc_bin = vol_profile.idxmax()
+        poc_price = (poc_bin.left + poc_bin.right) / 2 if pd.notna(poc_bin) else df['close'].mean()
+    else:
+        poc_price = df['close'].mean()
+
     highs = df['high'].values
     lows = df['low'].values
     closes = df['close'].values
@@ -193,7 +202,7 @@ def calculate_advanced_metrics(df):
         if all_fvgs:
             selected_fvg = [all_fvgs[-1]]
             
-    return df, supports, resistances, breakouts, selected_fvg
+    return df, supports, resistances, breakouts, selected_fvg, poc_price
 
 # 9. Gatekeeper Checklist Evaluation Function
 def evaluate_gatekeeper_checklist(symbol, live_price, ema_50, rsi_val):
@@ -229,7 +238,6 @@ st.sidebar.subheader("💰 Risk & Position Management")
 account_balance = st.sidebar.number_input("Account Balance ($):", value=10000.0, step=500.0)
 risk_percentage = st.sidebar.slider("Risk Per Trade (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
 
-# --- NEW: Trailing SL Options ---
 enable_trailing = st.sidebar.checkbox("Activate Trailing SL Advisor")
 trailing_offset_pct = st.sidebar.slider("Trailing Buffer (%):", min_value=0.2, max_value=2.0, value=0.5, step=0.1)
 
@@ -252,7 +260,6 @@ tp1_price = st.sidebar.number_input("Take Profit 1 (TP1):", value=float(st.sessi
 tp2_price = st.sidebar.number_input("Take Profit 2 (TP2):", value=float(st.session_state['tp2']), format="%.4f", step=p_step)
 tp3_price = st.sidebar.number_input("Take Profit 3 (TP3):", value=float(st.session_state['tp3']), format="%.4f", step=p_step)
 
-# Adjust SL if Trailing is active based on current live price movement
 if enable_trailing:
     if "LONG" in trade_type and current_live_price > entry_price:
         suggested_trail_sl = current_live_price * (1 - trailing_offset_pct / 100.0)
@@ -266,7 +273,12 @@ if enable_trailing:
 risk_usd = account_balance * (risk_percentage / 100.0)
 units = risk_usd / abs(entry_price - sl_price) if abs(entry_price - sl_price) > 0 else 0
 
-st.sidebar.info(f"💡 Risk: **${risk_usd:.2f}** | Size: **{units:,.2f} units**")
+# --- NEW: Automatic Risk-to-Reward Ratio (RRR) Calculation ---
+risk_distance = abs(entry_price - sl_price)
+reward_distance = abs(tp1_price - entry_price)
+rrr_ratio = reward_distance / risk_distance if risk_distance > 0 else 0.0
+
+st.sidebar.info(f"💡 Risk: **${risk_usd:.2f}** | Size: **{units:,.2f} units**\n\n⚖️ **Est. RRR (TP1):** `1:{rrr_ratio:.2f}`")
 
 # --- TELEGRAM WEBHOOK CONFIG (SIDEBAR) ---
 st.sidebar.divider()
@@ -289,14 +301,13 @@ col1, col2 = st.columns([3, 1])
 with col1:
     df = fetch_chart_data(selected_coin, timeframe=timeframe)
     if not df.empty:
-        df, supports, resistances, breakouts, fvgs = calculate_advanced_metrics(df)
+        df, supports, resistances, breakouts, fvgs, poc_price = calculate_advanced_metrics(df)
         live_price = df['close'].iloc[-1]
         rsi_val = df['RSI'].iloc[-1]
         ema_50 = df['EMA_50'].iloc[-1]
         ema_200 = df['EMA_200'].iloc[-1]
         candle_pattern = detect_candle_patterns(df)
         
-        # --- NEW: Multi-Timeframe Confluence Fetcher ---
         df_15m = fetch_chart_data(selected_coin, timeframe='15m', limit=50)
         df_1h = fetch_chart_data(selected_coin, timeframe='1h', limit=50)
         df_4h = fetch_chart_data(selected_coin, timeframe='4h', limit=50)
@@ -306,13 +317,14 @@ with col1:
         trend_4h = "BULLISH 🟢" if not df_4h.empty and df_4h['close'].iloc[-1] > df_4h['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
         
         score = 0
-        if "LONG" in trade_type and live_price > ema_50: score += 20
-        if "SHORT" in trade_type and live_price < ema_50: score += 20
-        if "LONG" in trade_type and bid_p > 50: score += 20
-        if "SHORT" in trade_type and ask_p > 50: score += 20
-        if ("LONG" in trade_type and "BULLISH" in trend_4h) or ("SHORT" in trade_type and "BEARISH" in trend_4h): score += 20
-        if 30 < rsi_val < 70: score += 20
-        if ("LONG" in trade_type and "Bullish" in candle_pattern) or ("SHORT" in trade_type and "Bearish" in candle_pattern): score += 20
+        if "LONG" in trade_type and live_price > ema_50: score += 15
+        if "SHORT" in trade_type and live_price < ema_50: score += 15
+        if "LONG" in trade_type and bid_p > 50: score += 15
+        if "SHORT" in trade_type and ask_p > 50: score += 15
+        if ("LONG" in trade_type and "BULLISH" in trend_4h) or ("SHORT" in trade_type and "BEARISH" in trend_4h): score += 15
+        if 30 < rsi_val < 70: score += 15
+        if rrr_ratio >= 1.5: score += 15
+        if ("LONG" in trade_type and "Bullish" in candle_pattern) or ("SHORT" in trade_type and "Bearish" in candle_pattern): score += 10
         score = min(score, 100)
 
         sc1, sc2, sc3, sc4 = st.columns(4)
@@ -321,7 +333,6 @@ with col1:
         sc3.metric("Candle Pattern", candle_pattern)
         sc4.metric("Confidence Score", f"{score}%", "A+ Grade" if score >= 75 else "Moderate")
 
-        # --- NEW: Multi-Timeframe Confluence Dashboard Box ---
         st.markdown("### 🌐 Multi-Timeframe Trend Confluence Matrix")
         mtf_c1, mtf_c2, mtf_c3 = st.columns(3)
         mtf_c1.metric("15m Trend (Execution)", trend_15m)
@@ -341,6 +352,10 @@ with col1:
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#00D2FF', width=2)))
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=2)))
         
+        # --- NEW: Volume Profile Point of Control (POC) Line ---
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=poc_price, y1=poc_price, line=dict(color="#FFD700", width=2, dash="dashdot"))
+        fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/2)], y=poc_price, text=f"⭐ VPVR POC: ${poc_price:,.4f}", showarrow=False, yshift=15, font=dict(color="#FFD700", size=9, family="Arial Black"))
+
         # Support Zones
         for sup in supports:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=2, dash="dash"))
@@ -351,11 +366,9 @@ with col1:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=2, dash="dash"))
             fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/5)], y=res, text=f"RES: ${res:,.4f}", showarrow=False, yshift=16, font=dict(color="#D50000", size=9, family="Arial Black"))
 
-        # Breakouts
         for b in breakouts:
             fig.add_annotation(x=b['time'], y=b['price'], text=f"⚡ {b['type']}", showarrow=True, arrowhead=2, ax=0, ay=-35, bgcolor="#FFCC00", font=dict(color="black", size=9, family="Arial Black"))
 
-        # --- AUTOMATIC TREND-AWARE SINGLE FVG ZONE (WITH PRICES) ---
         for fvg in fvgs:
             fvg_color = "rgba(0, 230, 118, 0.25)" if fvg['type'] == 'Bullish FVG' else "rgba(255, 23, 68, 0.25)"
             line_color = "#00E676" if fvg['type'] == 'Bullish FVG' else "#FF1744"
@@ -368,7 +381,6 @@ with col1:
                 annotation_font=dict(color=line_color, size=9, family="Arial Black")
             )
 
-        # Trade Setup: Entry, SL, TP1, TP2, TP3
         t_label = "LONG" if "LONG" in trade_type else "SHORT"
         
         fig.add_hrect(
@@ -395,7 +407,6 @@ with col1:
         )
         st.plotly_chart(fig, use_container_width=True)
         
-        # --- CHART LEGEND & LIVE PRICE GUIDE ---
         st.markdown("### 🗺️ Chart Line Guide & Live Price Levels")
         
         guide_col1, guide_col2, guide_col3 = st.columns(3)
@@ -414,13 +425,16 @@ with col1:
             
         with guide_col3:
             st.markdown(fvg_text)
-            st.markdown(f"🎯 **TP 1 / TP 2 / TP 3:** `${tp1_price:,.4f}` / `${tp2_price:,.4f}` / `${tp3_price:,.4f}`")
-            st.markdown(f"⚡ **Current Live Price:** `${live_price:,.4f}`")
+            st.markdown(f"⭐ **VPVR POC Level:** `${poc_price:,.4f}`")
+            st.markdown(f"⚖️ **Risk-to-Reward (RRR):** `1:{rrr_ratio:.2f}`")
+
+        if rrr_ratio < 1.5:
+            st.warning(f"⚠️ **WARNING (Low RRR):** Current Risk-to-Reward ratio (1:{rrr_ratio:.2f}) is below the recommended 1:1.5 threshold!")
 
         if score >= 75:
             st.success(f"🚀 **HIGH CONFIDENCE SETUP ({score}%):** Strong confluence for execution!")
             if enable_tg and tg_token and tg_chat_id:
-                msg = f"🚀 *HIGH CONFIDENCE TRADE SETUP*\n\nAsset: `{selected_coin}`\nType: `{trade_type}`\nScore: `{score}%`\nEntry: `${entry_price}`\nSL: `${sl_price}`\nTP1: `${tp1_price}`"
+                msg = f"🚀 *HIGH CONFIDENCE TRADE SETUP*\n\nAsset: `{selected_coin}`\nType: `{trade_type}`\nScore: `{score}%`\nEntry: `${entry_price}`\nRRR: `1:{rrr_ratio:.2f}`"
                 send_telegram_alert(tg_token, tg_chat_id, msg)
         else:
             st.warning(f"⚠️ **MODERATE CONFIDENCE ({score}%):** Exercise caution or wait for clearer signals.")
@@ -431,6 +445,9 @@ with col2:
     st.subheader("🔒 Gatekeeper Checklist")
     
     checklist_status = evaluate_gatekeeper_checklist(selected_coin, live_price, ema_50, rsi_val)
+    if rrr_ratio < 1.5:
+        checklist_status["4. Risk Management (RRR Setup)"] = False
+
     all_passed = True
     for step, passed in checklist_status.items():
         if passed:
