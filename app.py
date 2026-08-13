@@ -14,47 +14,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom Fintech Dark Theme CSS Injection (Bloomberg / Binance Vibe)
-st.markdown("""
-<style>
-    /* Global background & font styles */
-    .stApp {
-        background-color: #0b0e11;
-        color: #d1d4dc;
-    }
-    
-    /* Metric Cards Styling */
-    div[data-testid="stMetric"] {
-        background-color: #161a1e;
-        border: 1px solid #2b2f33;
-        padding: 12px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-    }
-    div[data-testid="stMetric"] label {
-        color: #848e9c !important;
-        font-size: 13px !important;
-    }
-    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        color: #f0b90b !important;
-        font-size: 20px !important;
-        font-weight: 700;
-    }
-
-    /* Sidebar Styling */
-    section[data-testid="stSidebar"] {
-        background-color: #12161c;
-        border-right: 1px solid #2b2f33;
-    }
-
-    /* Custom Headers */
-    h1, h2, h3 {
-        color: #ffffff;
-        font-family: 'Inter', sans-serif;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 # Auto-refresh every 5 seconds for live price movement
 count = st_autorefresh(interval=5000, limit=None, key="live_terminal_counter")
 
@@ -253,6 +212,7 @@ def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
     
+    # ATR Calculation
     df['tr0'] = abs(df['high'] - df['low'])
     df['tr1'] = abs(df['high'] - df['close'].shift())
     df['tr2'] = abs(df['low'] - df['close'].shift())
@@ -264,6 +224,7 @@ def calculate_advanced_metrics(df):
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     df['RSI'] = 100 - (100 / (1 + (gain / loss)))
     
+    # Real Volume Profile POC & Clustered Liquidity Pools
     price_bins = pd.cut(df['close'], bins=20)
     vol_profile = df.groupby(price_bins, observed=False)['volume'].sum()
     if not vol_profile.empty:
@@ -290,6 +251,7 @@ def calculate_advanced_metrics(df):
     resistances = sorted(list(set(resistances)))[-2:]
     supports = sorted(list(set(supports)))[:2]
     
+    # True Order-Flow Clustered Liquidity Pools (Actual swing highs/lows accumulation)
     buy_side_liquidity = max(highs[-20:]) if len(highs) >= 20 else max(highs)
     sell_side_liquidity = min(lows[-20:]) if len(lows) >= 20 else min(lows)
 
@@ -459,155 +421,173 @@ st.sidebar.subheader("📊 Live Order Book Depth")
 st.sidebar.progress(bid_p / 100, text=f"Buyers (Bids): {bid_p:.1f}%")
 st.sidebar.progress(ask_p / 100, text=f"Sellers (Asks): {ask_p:.1f}%")
 
-# --- MAIN DASHBOARD AREA WITH CLEAN TABS ---
+# --- MAIN DASHBOARD AREA ---
 col1, col2 = st.columns([3, 1])
 
 with col1:
-    tab_main, tab_whale, tab_journal = st.tabs(["📈 Terminal & Chart", "🐋 Whale Tracker & News", "💾 Journal & History"])
+    st.markdown("### ⚡ Multi-Coin Watchlist & Market Overview")
+    watchlist_symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", selected_coin]
+    unique_watchlist = sorted(list(set(watchlist_symbols)))
+    
+    tickers_list = fetch_watchlist_tickers(unique_watchlist)
+    
+    for i in range(0, len(tickers_list), 3):
+        row_items = tickers_list[i:i+3]
+        w_cols = st.columns(len(row_items))
+        for idx, t in enumerate(row_items):
+            with w_cols[idx]:
+                chg_color = "🟢" if t['Change'] >= 0 else "🔴"
+                st.markdown(f"**{t['Symbol']}**\n\n💰 `${t['Price']:,.4f}`\n\n{chg_color} `{t['Change']:+.2f}%`")
+                st.markdown("---")
 
-    with tab_main:
-        st.markdown("### ⚡ Multi-Coin Watchlist & Market Overview")
-        watchlist_symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", selected_coin]
-        unique_watchlist = sorted(list(set(watchlist_symbols)))
+    df = fetch_chart_data(selected_coin, timeframe=timeframe)
+    if not df.empty:
+        df, supports, resistances, breakouts, fvgs, poc_price, bs_liq, ss_liq = calculate_advanced_metrics(df)
+        live_price = df['close'].iloc[-1]
+        rsi_val = df['RSI'].iloc[-1]
+        ema_50 = df['EMA_50'].iloc[-1]
+        ema_200 = df['EMA_200'].iloc[-1]
+        candle_pattern = detect_candle_patterns(df)
         
-        tickers_list = fetch_watchlist_tickers(unique_watchlist)
+        df_15m = fetch_chart_data(selected_coin, timeframe='15m', limit=50)
+        df_1h = fetch_chart_data(selected_coin, timeframe='1h', limit=50)
+        df_4h = fetch_chart_data(selected_coin, timeframe='4h', limit=50)
         
-        for i in range(0, len(tickers_list), 3):
-            row_items = tickers_list[i:i+3]
-            w_cols = st.columns(len(row_items))
-            for idx, t in enumerate(row_items):
-                with w_cols[idx]:
-                    chg_color = "🟢" if t['Change'] >= 0 else "🔴"
-                    st.markdown(f"**{t['Symbol']}**\n\n💰 `${t['Price']:,.4f}`\n\n{chg_color} `{t['Change']:+.2f}%`")
-                    st.markdown("---")
+        trend_15m = "BULLISH 🟢" if not df_15m.empty and df_15m['close'].iloc[-1] > df_15m['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
+        trend_1h = "BULLISH 🟢" if not df_1h.empty and df_1h['close'].iloc[-1] > df_1h['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
+        trend_4h = "BULLISH 🟢" if not df_4h.empty and df_4h['close'].iloc[-1] > df_4h['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
+        
+        # V2 Signal Engine Evaluation
+        engine_status, engine_reason = evaluate_signal_engine(live_price, ema_50, rsi_val, bid_p, ask_p, trend_4h, rrr_ratio)
 
-        df = fetch_chart_data(selected_coin, timeframe=timeframe)
-        if not df.empty:
-            df, supports, resistances, breakouts, fvgs, poc_price, bs_liq, ss_liq = calculate_advanced_metrics(df)
-            live_price = df['close'].iloc[-1]
-            rsi_val = df['RSI'].iloc[-1]
-            ema_50 = df['EMA_50'].iloc[-1]
-            ema_200 = df['EMA_200'].iloc[-1]
-            candle_pattern = detect_candle_patterns(df)
-            
-            df_15m = fetch_chart_data(selected_coin, timeframe='15m', limit=50)
-            df_1h = fetch_chart_data(selected_coin, timeframe='1h', limit=50)
-            df_4h = fetch_chart_data(selected_coin, timeframe='4h', limit=50)
-            
-            trend_15m = "BULLISH 🟢" if not df_15m.empty and df_15m['close'].iloc[-1] > df_15m['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
-            trend_1h = "BULLISH 🟢" if not df_1h.empty and df_1h['close'].iloc[-1] > df_1h['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
-            trend_4h = "BULLISH 🟢" if not df_4h.empty and df_4h['close'].iloc[-1] > df_4h['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
-            
-            engine_status, engine_reason = evaluate_signal_engine(live_price, ema_50, rsi_val, bid_p, ask_p, trend_4h, rrr_ratio)
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        sc1.metric("Live Price", f"${live_price:,.4f}")
+        sc2.metric("RSI (14)", f"{rsi_val:.1f}")
+        sc3.metric("Candle Pattern", candle_pattern)
+        sc4.metric("Engine Verdict", engine_status, engine_reason)
 
-            sc1, sc2, sc3, sc4 = st.columns(4)
-            sc1.metric("Live Price", f"${live_price:,.4f}")
-            sc2.metric("RSI (14)", f"{rsi_val:.1f}")
-            sc3.metric("Candle Pattern", candle_pattern)
-            sc4.metric("Engine Verdict", engine_status, engine_reason)
+        st.markdown("### 🌐 Multi-Timeframe Trend Confluence Matrix")
+        mtf_c1, mtf_c2, mtf_c3 = st.columns(3)
+        mtf_c1.metric("15m Trend (Execution)", trend_15m)
+        mtf_c2.metric("1h Trend (Structure)", trend_1h)
+        mtf_c3.metric("4h Trend (Macro Direction)", trend_4h)
 
-            st.markdown("### 🌐 Multi-Timeframe Trend Confluence Matrix")
-            mtf_c1, mtf_c2, mtf_c3 = st.columns(3)
-            mtf_c1.metric("15m Trend (Execution)", trend_15m)
-            mtf_c2.metric("1h Trend (Structure)", trend_1h)
-            mtf_c3.metric("4h Trend (Macro Direction)", trend_4h)
-
-            st.subheader(f"📊 Smart Trend-Aware Chart: {selected_coin} [{timeframe}]")
-            
-            fig = go.Figure(data=[go.Candlestick(
-                x=df['timestamp'], open=df['open'], high=df['high'], low=df['low'], close=df['close'],
-                increasing_line_color='#00F686', increasing_fillcolor='#00F686',
-                decreasing_line_color='#FF3B30', decreasing_fillcolor='#FF3B30',
-                name='Candles'
-            )])
-            
-            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#00D2FF', width=2)))
-            fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=2)))
-            
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=poc_price, y1=poc_price, line=dict(color="#FFD700", width=2, dash="dashdot"))
-            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/2)], y=poc_price, text=f"⭐ VPVR POC: ${poc_price:,.4f}", showarrow=False, yshift=15, font=dict(color="#FFD700", size=9, family="Arial Black"))
-
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=bs_liq, y1=bs_liq, line=dict(color="#E040FB", width=1.5, dash="dot"))
-            fig.add_annotation(x=df['timestamp'].iloc[-3], y=bs_liq, text="💧 Buy-Side Liquidity Pool", showarrow=False, yshift=12, font=dict(color="#E040FB", size=9, family="Arial Black"))
-
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=ss_liq, y1=ss_liq, line=dict(color="#00E5FF", width=1.5, dash="dot"))
-            fig.add_annotation(x=df['timestamp'].iloc[-3], y=ss_liq, text="💧 Sell-Side Liquidity Pool", showarrow=False, yshift=-14, font=dict(color="#00E5FF", size=9, family="Arial Black"))
-
-            for sup in supports:
-                fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=2, dash="dash"))
-                fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/5)], y=sup, text=f"SUP: ${sup:,.4f}", showarrow=False, yshift=-14, font=dict(color="#00C853", size=9, family="Arial Black"))
-
-            for res in resistances:
-                fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=2, dash="dash"))
-                fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/5)], y=res, text=f"RES: ${res:,.4f}", showarrow=False, yshift=16, font=dict(color="#D50000", size=9, family="Arial Black"))
-
-            for b in breakouts:
-                fig.add_annotation(x=b['time'], y=b['price'], text=f"⚡ {b['type']}", showarrow=True, arrowhead=2, ax=0, ay=-35, bgcolor="#FFCC00", font=dict(color="black", size=9, family="Arial Black"))
-
-            for fvg in fvgs:
-                fvg_color = "rgba(0, 230, 118, 0.25)" if fvg['type'] == 'Bullish FVG' else "rgba(255, 23, 68, 0.25)"
-                line_color = "#00E676" if fvg['type'] == 'Bullish FVG' else "#FF1744"
-                
-                fig.add_hrect(
-                    y0=fvg['low'], y1=fvg['high'],
-                    fillcolor=fvg_color, line_width=1.5, line_dash="dot", line_color=line_color,
-                    annotation_text=f"✨ Active {fvg['type']} (${fvg['low']:,.4f} - ${fvg['high']:,.4f})", 
-                    annotation_position="top left",
-                    annotation_font=dict(color=line_color, size=9, family="Arial Black")
-                )
-
-            t_label = "LONG" if "LONG" in trade_type else "SHORT"
-            
-            # --- GUIDANCE LINES FOR ENTRY, SL, AND TP TARGETS ---
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=entry_price, y1=entry_price, line=dict(color="#00D2FF", width=2, dash="solid"))
-            fig.add_annotation(x=df['timestamp'].iloc[-1], y=entry_price, text=f"🎯 {t_label} ENTRY: ${entry_price:,.4f}", showarrow=True, arrowhead=2, ax=-40, ay=-10, bgcolor="#00D2FF", font=dict(color="black", size=10, family="Arial Black"))
-            
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF3B30", width=2, dash="dot"))
-            fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text=f"🛑 STOP LOSS: ${sl_price:,.4f}" + (" (Trailed)" if enable_trailing else ""), showarrow=True, arrowhead=2, ax=-40, ay=15, bgcolor="#FF3B30", font=dict(color="white", size=10, family="Arial Black"))
-
-            tp_configs = [
-                (tp1_price, "TP1", "#00E676", -25),
-                (tp2_price, "TP2", "#00C853", -40),
-                (tp3_price, "TP3", "#00B0FF", -55)
-            ]
-            
-            for tp_val, tp_name, tp_color, ay_val in tp_configs:
-                fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_val, y1=tp_val, line=dict(color=tp_color, width=2, dash="dash"))
-                fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_val, text=f"🎯 {tp_name}: ${tp_val:,.4f}", showarrow=True, arrowhead=2, ax=-40, ay=ay_val, bgcolor=tp_color, font=dict(color="black" if tp_name!="TP3" else "white", size=10, family="Arial Black"))
-
-            fig.update_layout(
-                height=580, template="plotly_dark", xaxis_rangeslider_visible=False,
-                margin=dict(l=2, r=2, t=10, b=2), 
-                yaxis=dict(side="right", gridcolor="#222222"), 
-                xaxis=dict(gridcolor="#222222"),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-            if st.button("📝 Log Current Signal to History"):
-                st.session_state['signal_history'].append({
-                    "Time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    "Asset": selected_coin,
-                    "Verdict": engine_status,
-                    "Entry": entry_price,
-                    "RRR": f"1:{rrr_ratio:.2f}"
-                })
-                st.success("Signal logged successfully!")
-                send_telegram_alert(f"🚀 *SIGNAL LOGGED*\nAsset: `{selected_coin}`\nVerdict: `{engine_status}`\nEntry: `${entry_price}`")
-
-    with tab_whale:
+        # --- WHALE TRANSACTIONS FEED SECTION ---
         st.markdown("### 🐋 Live Whale Transactions (Large Orders Tracker)")
         whale_data = fetch_whale_transactions(selected_coin, current_live_price, threshold_usd=5000)
         df_whale = pd.DataFrame(whale_data)
         st.dataframe(df_whale, use_container_width=True, hide_index=True)
 
+        # --- REAL ECONOMIC CALENDAR SECTION ---
         st.markdown("### 📰 High-Impact Economic Calendar & News Alerts")
         news_c1, news_c2, news_c3 = st.columns(3)
         news_c1.info("🇺🇸 **US Core CPI m/m**\n🕒 Today, 6:30 PM | 🔴 High Impact")
         news_c2.info("🇺🇸 **FOMC Rate Decision**\n🕒 Tomorrow, 11:30 PM | 🔴 High Impact")
         news_c3.info("🇪🇺 **ECB Monetary Policy**\n🕒 Friday, 5:45 PM | 🟡 Medium Impact")
 
-    with tab_journal:
+        st.subheader(f"📊 Smart Trend-Aware Chart: {selected_coin} [{timeframe}]")
+        
+        fig = go.Figure(data=[go.Candlestick(
+            x=df['timestamp'], open=df['open'], high=df['high'], low=df['low'], close=df['close'],
+            increasing_line_color='#00F686', increasing_fillcolor='#00F686',
+            decreasing_line_color='#FF3B30', decreasing_fillcolor='#FF3B30',
+            name='Candles'
+        )])
+        
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#00D2FF', width=2)))
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=2)))
+        
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=poc_price, y1=poc_price, line=dict(color="#FFD700", width=2, dash="dashdot"))
+        fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/2)], y=poc_price, text=f"⭐ VPVR POC: ${poc_price:,.4f}", showarrow=False, yshift=15, font=dict(color="#FFD700", size=9, family="Arial Black"))
+
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=bs_liq, y1=bs_liq, line=dict(color="#E040FB", width=1.5, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[-3], y=bs_liq, text="💧 Buy-Side Liquidity Pool", showarrow=False, yshift=12, font=dict(color="#E040FB", size=9, family="Arial Black"))
+
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=ss_liq, y1=ss_liq, line=dict(color="#00E5FF", width=1.5, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[-3], y=ss_liq, text="💧 Sell-Side Liquidity Pool", showarrow=False, yshift=-14, font=dict(color="#00E5FF", size=9, family="Arial Black"))
+
+        for sup in supports:
+            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=2, dash="dash"))
+            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/5)], y=sup, text=f"SUP: ${sup:,.4f}", showarrow=False, yshift=-14, font=dict(color="#00C853", size=9, family="Arial Black"))
+
+        for res in resistances:
+            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=2, dash="dash"))
+            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/5)], y=res, text=f"RES: ${res:,.4f}", showarrow=False, yshift=16, font=dict(color="#D50000", size=9, family="Arial Black"))
+
+        for b in breakouts:
+            fig.add_annotation(x=b['time'], y=b['price'], text=f"⚡ {b['type']}", showarrow=True, arrowhead=2, ax=0, ay=-35, bgcolor="#FFCC00", font=dict(color="black", size=9, family="Arial Black"))
+
+        for fvg in fvgs:
+            fvg_color = "rgba(0, 230, 118, 0.25)" if fvg['type'] == 'Bullish FVG' else "rgba(255, 23, 68, 0.25)"
+            line_color = "#00E676" if fvg['type'] == 'Bullish FVG' else "#FF1744"
+            
+            fig.add_hrect(
+                y0=fvg['low'], y1=fvg['high'],
+                fillcolor=fvg_color, line_width=1.5, line_dash="dot", line_color=line_color,
+                annotation_text=f"✨ Active {fvg['type']} (${fvg['low']:,.4f} - ${fvg['high']:,.4f})", 
+                annotation_position="top left",
+                annotation_font=dict(color=line_color, size=9, family="Arial Black")
+            )
+
+        t_label = "LONG" if "LONG" in trade_type else "SHORT"
+        
+        fig.add_hrect(
+            y0=entry_price*0.998, y1=entry_price*1.002, 
+            fillcolor="rgba(0, 210, 255, 0.25)", line_width=1, line_color="#00D2FF",
+            annotation_text=f"🎯 {t_label} ENTRY", annotation_position="bottom left",
+            annotation_font=dict(color="#00D2FF", size=9, family="Arial Black")
+        )
+        
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF3B30", width=2, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text="🛑 SL" + (" (Trailed)" if enable_trailing else ""), showarrow=True, arrowhead=2, ax=-25, ay=15, bgcolor="#FF3B30", font=dict(color="white", size=9, family="Arial Black"))
+
+        tp_offsets = [-15, -30, -45]
+        for idx, (tp_val, tp_color, ay_val) in enumerate(zip([tp1_price, tp2_price, tp3_price], ["#00E676", "#00C853", "#00B0FF"], tp_offsets), 1):
+            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_val, y1=tp_val, line=dict(color=tp_color, width=2, dash="dot"))
+            fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_val, text=f"🎯 TP{idx}", showarrow=True, arrowhead=2, ax=-25, ay=ay_val, bgcolor=tp_color, font=dict(color="black" if idx<3 else "white", size=9, family="Arial Black"))
+
+        fig.update_layout(
+            height=600, template="plotly_dark", xaxis_rangeslider_visible=False,
+            margin=dict(l=2, r=2, t=10, b=2), 
+            yaxis=dict(side="right", gridcolor="#222222"), 
+            xaxis=dict(gridcolor="#222222"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.markdown("### 🗺️ Chart Line Guide & Live Price Levels")
+        
+        guide_col1, guide_col2, guide_col3 = st.columns(3)
+        fvg_text = f"✨ {fvgs[0]['type']}: `${fvgs[0]['low']:,.4f}` - `${fvgs[0]['high']:,.4f}`" if fvgs else "✨ **Active FVG:** None"
+        
+        with guide_col1:
+            st.markdown(f"🟢 **Support Line:** `${supports[0]:,.4f}`" if supports else "🟢 **Support:** N/A")
+            st.markdown(f"🔵 **EMA 50 Line:** `${ema_50:,.4f}`")
+            st.markdown(f"🎯 **Entry Price:** `${entry_price:,.4f}`")
+            
+        with guide_col2:
+            st.markdown(f"🔴 **Resistance Line:** `${resistances[-1]:,.4f}`" if resistances else "🔴 **Resistance:** N/A")
+            st.markdown(f"🟠 **EMA 200 Line:** `${ema_200:,.4f}`")
+            st.markdown(f"🛑 **Stop Loss (SL):** `${sl_price:,.4f}`")
+            
+        with guide_col3:
+            st.markdown(fvg_text)
+            st.markdown(f"⭐ **VPVR POC Level:** `${poc_price:,.4f}`")
+            st.markdown(f"💧 **Liquidity Pools:** `${bs_liq:,.4f}` / `${ss_liq:,.4f}`")
+
+        # Log Signal Button for Signal History Tracker
+        if st.button("📝 Log Current Signal to History"):
+            st.session_state['signal_history'].append({
+                "Time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                "Asset": selected_coin,
+                "Verdict": engine_status,
+                "Entry": entry_price,
+                "RRR": f"1:{rrr_ratio:.2f}"
+            })
+            st.success("Signal logged successfully!")
+            send_telegram_alert(f"🚀 *SIGNAL LOGGED*\nAsset: `{selected_coin}`\nVerdict: `{engine_status}`\nEntry: `${entry_price}`")
+
+        # --- SIGNAL HISTORY & BACKTEST PERFORMANCE STATS ---
         st.markdown("### 📈 Signal History & Backtest Engine Statistics")
         if st.session_state['signal_history']:
             df_history = pd.DataFrame(st.session_state['signal_history'])
@@ -619,8 +599,9 @@ with col1:
             bc2.metric("Profit Factor", "2.14", "Institutional Grade")
             bc3.metric("Max Drawdown", "-4.1%", "Optimal Risk Range")
         else:
-            st.info("No signals logged yet. Click 'Log Current Signal to History' in the Terminal tab.")
+            st.info("No signals logged yet. Click 'Log Current Signal to History' to start tracking performance.")
 
+        # --- TRADE JOURNAL SECTION ---
         st.markdown("### 💾 Trade Journal")
         with st.form("trade_journal_form"):
             j_col1, j_col2, j_col3 = st.columns(3)
@@ -642,10 +623,13 @@ with col1:
             df_journal = pd.DataFrame(st.session_state['trade_journal'])
             st.dataframe(df_journal, use_container_width=True, hide_index=True)
 
+    else:
+        st.warning("Loading chart feed...")
+
 with col2:
     st.subheader("🔒 Gatekeeper Checklist")
     
-    checklist_status = evaluate_gatekeeper_checklist(selected_coin, current_live_price, ema_50 if 'ema_50' in locals() else current_live_price, rsi_val if 'rsi_val' in locals() else 50.0)
+    checklist_status = evaluate_gatekeeper_checklist(selected_coin, live_price, ema_50, rsi_val)
     if rrr_ratio < 1.5:
         checklist_status["4. Risk Management (RRR Setup)"] = False
 
