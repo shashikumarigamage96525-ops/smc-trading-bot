@@ -61,19 +61,23 @@ def fetch_chart_data(symbol, timeframe='1h'):
         clean = symbol.replace("/", "")
         url = f"https://api.binance.com/api/v3/klines?symbol={clean}&interval={timeframe}&limit=100"
         res = requests.get(url, timeout=5)
+        if res.status_code != 200:
+            url = f"https://data-api.binance.vision/api/v3/klines?symbol={clean}&interval={timeframe}&limit=100"
+            res = requests.get(url, timeout=5)
         data = res.json()
-        df = pd.DataFrame(data, columns=['ts', 'o', 'h', 'l', 'c', 'v', 'ct', 'qav', 'not', 'tb', 'tq', 'i'])
-        df['ts'] = pd.to_datetime(df['ts'], unit='ms')
-        for col in ['o', 'h', 'l', 'c', 'v']: df[col] = df[col].astype(float)
-        df['EMA_50'] = df['c'].ewm(span=50, adjust=False).mean()
-        
-        # RSI Calculation
-        delta = df['c'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        df['RSI'] = 100 - (100 / (1 + (gain / loss)))
-        return df
-    except: return pd.DataFrame()
+        if isinstance(data, list) and len(data) > 0:
+            df = pd.DataFrame(data, columns=['ts', 'o', 'h', 'l', 'c', 'v', 'ct', 'qav', 'not', 'tb', 'tq', 'i'])
+            df['ts'] = pd.to_datetime(df['ts'], unit='ms')
+            for col in ['o', 'h', 'l', 'c', 'v']: df[col] = df[col].astype(float)
+            df['EMA_50'] = df['c'].ewm(span=50, adjust=False).mean()
+            
+            delta = df['c'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            df['RSI'] = 100 - (100 / (1 + (gain / loss)))
+            return df
+    except: pass
+    return pd.DataFrame()
 
 # --- MARKET STRUCTURE ENGINE ---
 def get_market_structure(df):
@@ -86,12 +90,14 @@ def get_market_structure(df):
 
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("🎛 Control & Intelligence Hub")
-selected_coin = st.sidebar.selectbox("Select Asset:", fetch_available_coins(), index=0)
+available_coins = fetch_available_coins()
+default_idx = available_coins.index("BTC/USDT") if "BTC/USDT" in available_coins else 0
+selected_coin = st.sidebar.selectbox("Select Asset:", available_coins, index=default_idx)
 timeframe = st.sidebar.selectbox("Execution Timeframe:", ["5m", "15m", "1h", "4h"], index=2)
 trade_type = st.sidebar.radio("Direction:", ["LONG (Bullish)", "SHORT (Bearish)"], horizontal=True)
 
-df_check = fetch_chart_data(selected_coin, timeframe=timeframe)
-current_live_price = df_check['c'].iloc[-1] if not df_check.empty else 1.0
+df = fetch_chart_data(selected_coin, timeframe=timeframe)
+current_live_price = df['c'].iloc[-1] if not df.empty else 1.0
 
 st.sidebar.divider()
 st.sidebar.subheader("💰 Risk & Position Management")
@@ -127,9 +133,8 @@ c2.metric("Liquidated Longs", f"${l_long:,.0f}", "🔴 Sellers Swiped")
 c3.metric("Liquidated Shorts", f"${l_short:,.0f}", "🟢 Buyers Squeezed")
 
 # 2. Smart Money Market Structure Panel
-df = fetch_chart_data(selected_coin, timeframe=timeframe)
-if not df.empty:
-    s_high, s_low, eq_price = get_market_structure(df)
+s_high, s_low, eq_price = get_market_structure(df)
+if eq_price > 0:
     st.markdown("### 🏗 Smart Money Market Structure (Premium / Discount)")
     ms_c1, ms_c2, ms_c3 = st.columns(3)
     ms_c1.metric("Premium Zone (High)", f"${s_high:,.4f}")
@@ -140,6 +145,8 @@ if not df.empty:
         st.warning("⚠️ Market is in **PREMIUM Zone**: Favor SHORT setups or wait for discount pullbacks.")
     else:
         st.success("✅ Market is in **DISCOUNT Zone**: Favor LONG setups for institutional entries.")
+else:
+    eq_price = current_live_price
 
 # Chart, Whales & Checklist Layout
 col_chart, col_checker = st.columns([3, 1])
@@ -160,7 +167,7 @@ with col_chart:
         whale_data = fetch_whale_transactions(selected_coin, current_live_price)
         st.dataframe(pd.DataFrame(whale_data), hide_index=True, use_container_width=True)
     else:
-        st.error("Could not fetch chart data.")
+        st.error("Could not fetch chart data. Please check asset or network.")
 
 with col_checker:
     st.subheader("🔒 Gatekeeper Checklist")
