@@ -6,12 +6,11 @@ import requests
 from streamlit_autorefresh import st_autorefresh
 
 # ============================================================
-# ⚡ ULTIMATE INSTITUTIONAL TRADING TERMINAL V3
+# ⚡ ULTIMATE INSTITUTIONAL TRADING TERMINAL V4
 # ============================================================
-# Features:
-# Binance live market data
+# Binance live data
 # Multi-timeframe analysis
-# EMA 20/50/200
+# EMA 20 / 50 / 200
 # RSI
 # ATR
 # Support / Resistance
@@ -23,16 +22,19 @@ from streamlit_autorefresh import st_autorefresh
 # Order Book Imbalance
 # Whale Trades
 # ATR based SL / TP
-# Dynamic R:R
-# LONG / SHORT / WAIT engine
-# Setup Quality Score
+# LONG / SHORT / WAIT
+# Confluence Score
 # Backtesting
 # Telegram Alerts
 # Trade Journal
+#
+# NOTE:
+# This is a rule-based analysis/decision-support tool.
+# No system can guarantee 100% accurate trades.
 # ============================================================
 
 st.set_page_config(
-    page_title="Ultimate Institutional Trading Terminal V3",
+    page_title="Ultimate Institutional Trading Terminal V4",
     page_icon="⚡",
     layout="wide"
 )
@@ -41,7 +43,7 @@ st.set_page_config(
 st_autorefresh(
     interval=5000,
     limit=None,
-    key="institutional_terminal_refresh"
+    key="terminal_refresh"
 )
 
 BINANCE_API = "https://api.binance.com/api/v3"
@@ -74,7 +76,7 @@ def safe_float(value, default=0.0):
 
 
 def clean_symbol(symbol):
-    return symbol.replace("/", "")
+    return str(symbol).replace("/", "")
 
 
 def format_price(price):
@@ -82,15 +84,17 @@ def format_price(price):
 
     if price >= 1000:
         return f"{price:,.2f}"
-    elif price >= 1:
+
+    if price >= 1:
         return f"{price:,.4f}"
-    elif price >= 0.01:
+
+    if price >= 0.01:
         return f"{price:,.5f}"
-    else:
-        return f"{price:,.8f}"
+
+    return f"{price:,.8f}"
 
 
-def binance_get(endpoint, params=None, timeout=5):
+def binance_get(endpoint, params=None, timeout=6):
 
     for base_url in [BINANCE_API, BINANCE_BACKUP]:
 
@@ -142,401 +146,4 @@ def fetch_available_coins():
                 for x in symbols
             ])
 
-    return sorted([
-        "BTC/USDT",
-        "ETH/USDT",
-        "SOL/USDT",
-        "BNB/USDT",
-        "XRP/USDT",
-        "ADA/USDT",
-        "DOGE/USDT",
-        "SUI/USDT",
-        "PEPE/USDT",
-        "ACE/USDT",
-        "AVAX/USDT",
-        "LINK/USDT",
-        "NEAR/USDT",
-        "RENDER/USDT",
-        "FET/USDT",
-        "INJ/USDT",
-        "OP/USDT",
-        "ARB/USDT",
-        "ICP/USDT",
-        "DOT/USDT",
-        "SHIB/USDT",
-        "UNI/USDT",
-        "APT/USDT"
-    ])
-
-
-# ============================================================
-# WATCHLIST TICKERS
-# ============================================================
-
-@st.cache_data(ttl=5)
-def fetch_watchlist_tickers(symbols):
-
-    data = binance_get(
-        "/ticker/24hr",
-        timeout=5
-    )
-
-    if not isinstance(data, list):
-        return []
-
-    lookup = {
-        x["symbol"]: x
-        for x in data
-    }
-
-    output = []
-
-    for symbol in symbols:
-
-        raw = clean_symbol(symbol)
-
-        if raw in lookup:
-
-            item = lookup[raw]
-
-            output.append({
-                "Symbol": symbol,
-                "Price": safe_float(item["lastPrice"]),
-                "Change": safe_float(item["priceChangePercent"]),
-                "Volume": safe_float(item["quoteVolume"])
-            })
-
-    return output
-
-
-# ============================================================
-# OHLCV
-# ============================================================
-
-@st.cache_data(ttl=5)
-def fetch_chart_data(
-    symbol,
-    timeframe="1h",
-    limit=250
-):
-
-    data = binance_get(
-        "/klines",
-        params={
-            "symbol": clean_symbol(symbol),
-            "interval": timeframe,
-            "limit": limit
-        },
-        timeout=6
-    )
-
-    if not isinstance(data, list):
-        return pd.DataFrame()
-
-    columns = [
-        "timestamp",
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "close_time",
-        "quote_asset_volume",
-        "number_of_trades",
-        "taker_buy_base",
-        "taker_buy_quote",
-        "ignore"
-    ]
-
-    try:
-
-        df = pd.DataFrame(
-            data,
-            columns=columns
-        )
-
-        df["timestamp"] = pd.to_datetime(
-            df["timestamp"],
-            unit="ms"
-        )
-
-        numeric_columns = [
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume"
-        ]
-
-        for column in numeric_columns:
-
-            df[column] = pd.to_numeric(
-                df[column],
-                errors="coerce"
-            )
-
-        df = df.dropna()
-
-        return df.reset_index(drop=True)
-
-    except Exception:
-
-        return pd.DataFrame()
-
-
-# ============================================================
-# ORDER BOOK
-# ============================================================
-
-@st.cache_data(ttl=2)
-def fetch_order_book_metrics(symbol):
-
-    data = binance_get(
-        "/depth",
-        params={
-            "symbol": clean_symbol(symbol),
-            "limit": 100
-        },
-        timeout=4
-    )
-
-    if not isinstance(data, dict):
-
-        return 50.0, 50.0, 0.0
-
-    bids = sum(
-        safe_float(x[1])
-        for x in data.get("bids", [])
-    )
-
-    asks = sum(
-        safe_float(x[1])
-        for x in data.get("asks", [])
-    )
-
-    total = bids + asks
-
-    if total <= 0:
-
-        return 50.0, 50.0, 0.0
-
-    bid_pressure = bids / total * 100
-    ask_pressure = asks / total * 100
-
-    imbalance = (
-        (bids - asks)
-        / total
-        * 100
-    )
-
-    return (
-        bid_pressure,
-        ask_pressure,
-        imbalance
-    )
-
-
-# ============================================================
-# WHALE TRADES
-# ============================================================
-
-@st.cache_data(ttl=3)
-def fetch_whale_transactions(
-    symbol,
-    threshold_usd=5000
-):
-
-    data = binance_get(
-        "/trades",
-        params={
-            "symbol": clean_symbol(symbol),
-            "limit": 1000
-        },
-        timeout=5
-    )
-
-    if not isinstance(data, list):
-
-        return pd.DataFrame()
-
-    trades = []
-
-    for trade in data:
-
-        price = safe_float(
-            trade.get("price")
-        )
-
-        quantity = safe_float(
-            trade.get("qty")
-        )
-
-        total_usd = (
-            price * quantity
-        )
-
-        if total_usd >= threshold_usd:
-
-            side = (
-                "SELL 🔴"
-                if trade.get("isBuyerMaker")
-                else "BUY 🟢"
-            )
-
-            trades.append({
-
-                "Time":
-                    pd.to_datetime(
-                        trade.get("time"),
-                        unit="ms"
-                    ).strftime("%H:%M:%S"),
-
-                "Side":
-                    side,
-
-                "Price":
-                    price,
-
-                "Amount":
-                    quantity,
-
-                "Total ($)":
-                    total_usd
-            })
-
-    return pd.DataFrame(trades)
-
-
-# ============================================================
-# INDICATORS
-# ============================================================
-
-def add_indicators(df):
-
-    df = df.copy()
-
-    # EMA
-    df["EMA_20"] = (
-        df["close"]
-        .ewm(span=20, adjust=False)
-        .mean()
-    )
-
-    df["EMA_50"] = (
-        df["close"]
-        .ewm(span=50, adjust=False)
-        .mean()
-    )
-
-    df["EMA_200"] = (
-        df["close"]
-        .ewm(span=200, adjust=False)
-        .mean()
-    )
-
-    # RSI
-    delta = df["close"].diff()
-
-    gain = delta.clip(
-        lower=0
-    )
-
-    loss = -delta.clip(
-        upper=0
-    )
-
-    avg_gain = gain.ewm(
-        alpha=1 / 14,
-        adjust=False
-    ).mean()
-
-    avg_loss = loss.ewm(
-        alpha=1 / 14,
-        adjust=False
-    ).mean()
-
-    rs = (
-        avg_gain
-        / avg_loss.replace(0, np.nan)
-    )
-
-    df["RSI"] = (
-        100
-        - (
-            100
-            / (1 + rs)
-        )
-    )
-
-    df["RSI"] = df["RSI"].fillna(50)
-
-    # ATR
-    previous_close = df["close"].shift(1)
-
-    true_range = pd.concat(
-        [
-            df["high"] - df["low"],
-            (
-                df["high"]
-                - previous_close
-            ).abs(),
-            (
-                df["low"]
-                - previous_close
-            ).abs()
-        ],
-        axis=1
-    ).max(axis=1)
-
-    df["ATR"] = (
-        true_range
-        .ewm(
-            alpha=1 / 14,
-            adjust=False
-        )
-        .mean()
-    )
-
-    # Volume
-    df["Volume_SMA20"] = (
-        df["volume"]
-        .rolling(20)
-        .mean()
-    )
-
-    df["Volume_Ratio"] = (
-        df["volume"]
-        / df["Volume_SMA20"]
-        .replace(0, np.nan)
-    )
-
-    df["Volume_Ratio"] = (
-        df["Volume_Ratio"]
-        .replace(
-            [np.inf, -np.inf],
-            np.nan
-        )
-        .fillna(1)
-    )
-
-    return df
-
-
-# ============================================================
-# CANDLE PATTERN
-# ============================================================
-
-def detect_candle_pattern(df):
-
-    if len(df) < 2:
-
-        return "Neutral"
-
-    current = df.iloc[-1]
-    previous = df.iloc[-2]
-
-    # Bullish engulfing
-    if (
-        current["close"]
-        > current["open"]
-        and
+   
