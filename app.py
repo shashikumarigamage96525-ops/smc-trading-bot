@@ -328,7 +328,7 @@ with col2:
     
     st.divider()
     st.markdown("### 🎯 Institutional Summary:")
-    st.markdown(- **Strategy:** `{selected_strategy_name}`")
+    st.markdown(f"- **Strategy:** `{selected_strategy_name}`")
     st.markdown(f"- **Account Risk:** `${risk_amount_usd:,.2f}` ({risk_percentage}%)")
     st.markdown(f"- **Calculated Units:** `{position_size_units:,.2f}`")
     st.markdown(f"- **Entry Zone:** `${entry_price:,.4f}`")
