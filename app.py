@@ -85,7 +85,7 @@ def fetch_order_book_metrics(symbol):
     except:
         return 50.0, 50.0
 
-# 6. Indicators, S/R, Breakouts & FVG Engine (Detailed FVG Zones)
+# 6. Indicators, S/R, Breakouts & FVG Engine
 def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
@@ -125,7 +125,7 @@ def calculate_advanced_metrics(df):
             if closes[i] < last_sup and closes[i-1] >= last_sup:
                 breakouts.append({'time': times[i], 'price': closes[i], 'type': 'Bearish Breakdown'})
 
-    # Enhanced FVG with Upper & Lower bounds for clear zone plotting
+    # FVG Detection (Filter to keep only the most recent 2 to avoid cluttering)
     fvg_list = []
     for i in range(1, len(df) - 1):
         if df['low'].iloc[i+1] > df['high'].iloc[i-1]:
@@ -143,7 +143,7 @@ def calculate_advanced_metrics(df):
                 'time': df['timestamp'].iloc[i]
             })
             
-    return df, supports, resistances, breakouts, fvg_list
+    return df, supports, resistances, breakouts, fvg_list[-2:] if len(fvg_list) >= 2 else fvg_list
 
 # 7. Gatekeeper Checklist Evaluation Function
 def evaluate_gatekeeper_checklist(symbol, live_price, ema_50, rsi_val):
@@ -158,7 +158,7 @@ def evaluate_gatekeeper_checklist(symbol, live_price, ema_50, rsi_val):
 
 # --- UI LAYOUT ---
 st.title("⚡ Ultimate Institutional Trading Terminal")
-st.markdown("Live analytics, massive crystal-clear mobile chart, multi-TP targets, and Gatekeeper audit.")
+st.markdown("Live analytics, clean crystal-clear mobile chart, multi-TP targets, and Gatekeeper audit.")
 
 st.sidebar.header("🎛 Control & Intelligence Hub")
 
@@ -240,7 +240,7 @@ with col1:
         sc3.metric("4H Trend", higher_trend)
         sc4.metric("Confidence Score", f"{score}%", "A+ Grade" if score >= 75 else "Moderate")
 
-        st.subheader(f"📊 Huge Live Chart: {selected_coin} [{timeframe}]")
+        st.subheader(f"📊 Clean Live Chart: {selected_coin} [{timeframe}]")
         
         fig = go.Figure(data=[go.Candlestick(
             x=df['timestamp'], open=df['open'], high=df['high'], low=df['low'], close=df['close'],
@@ -256,49 +256,50 @@ with col1:
         # Support Zones
         for sup in supports:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=2, dash="dash"))
-            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=sup, text=f"SUPPORT: ${sup:,.4f}", showarrow=False, yshift=-12, font=dict(color="#00C853", size=10, family="Arial Black"))
+            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/5)], y=sup, text=f"SUP: ${sup:,.4f}", showarrow=False, yshift=-14, font=dict(color="#00C853", size=9, family="Arial Black"))
 
         # Resistance Zones
         for res in resistances:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=2, dash="dash"))
-            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=res, text=f"RESISTANCE: ${res:,.4f}", showarrow=False, yshift=14, font=dict(color="#D50000", size=10, family="Arial Black"))
+            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/5)], y=res, text=f"RES: ${res:,.4f}", showarrow=False, yshift=16, font=dict(color="#D50000", size=9, family="Arial Black"))
 
         # Breakouts
         for b in breakouts:
-            fig.add_annotation(x=b['time'], y=b['price'], text=f"⚡ {b['type']}", showarrow=True, arrowhead=2, ax=0, ay=-35, bgcolor="#FFCC00", font=dict(color="black", size=10, family="Arial Black"))
+            fig.add_annotation(x=b['time'], y=b['price'], text=f"⚡ {b['type']}", showarrow=True, arrowhead=2, ax=0, ay=-35, bgcolor="#FFCC00", font=dict(color="black", size=9, family="Arial Black"))
 
-        # --- CLEAR FVG ZONES (Highlighted Boxes & Text) ---
-        for fvg in fvgs[-3:]:
-            fvg_color = "rgba(0, 230, 118, 0.25)" if fvg['type'] == 'Bullish FVG' else "rgba(255, 23, 68, 0.25)"
+        # --- CLEAN UNCLUTTERED FVG ZONES ---
+        for fvg in fvgs:
+            fvg_color = "rgba(0, 230, 118, 0.20)" if fvg['type'] == 'Bullish FVG' else "rgba(255, 23, 68, 0.20)"
             line_color = "#00E676" if fvg['type'] == 'Bullish FVG' else "#FF1744"
             
-            # FVG Box Range
             fig.add_hrect(
                 y0=fvg['low'], y1=fvg['high'],
-                fillcolor=fvg_color, line_width=1.5, line_dash="dot", line_color=line_color,
-                annotation_text=f"✨ {fvg['type']}", annotation_position="right",
+                fillcolor=fvg_color, line_width=1, line_dash="dot", line_color=line_color,
+                annotation_text=f"✨ {fvg['type']}", annotation_position="top left",
                 annotation_font=dict(color=line_color, size=9, family="Arial Black")
             )
 
-        # Trade Setup: Entry, SL, TP1, TP2, TP3
+        # Trade Setup: Entry, SL, TP1, TP2, TP3 (Spaced out annotations to prevent overlap)
         t_label = "LONG" if "LONG" in trade_type else "SHORT"
         
         fig.add_hrect(
             y0=entry_price*0.998, y1=entry_price*1.002, 
             fillcolor="rgba(0, 210, 255, 0.25)", line_width=1, line_color="#00D2FF",
-            annotation_text=f"🎯 {t_label} ENTRY ZONE", annotation_position="top left",
-            annotation_font=dict(color="#00D2FF", size=10, family="Arial Black")
+            annotation_text=f"🎯 {t_label} ENTRY", annotation_position="bottom left",
+            annotation_font=dict(color="#00D2FF", size=9, family="Arial Black")
         )
         
-        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF3B30", width=2.5, dash="dot"))
-        fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text="🛑 SL", showarrow=True, arrowhead=2, ax=-30, ay=12, bgcolor="#FF3B30", font=dict(color="white", size=10, family="Arial Black"))
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF3B30", width=2, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text="🛑 SL", showarrow=True, arrowhead=2, ax=-25, ay=15, bgcolor="#FF3B30", font=dict(color="white", size=9, family="Arial Black"))
 
-        for idx, (tp_val, tp_color) in enumerate(zip([tp1_price, tp2_price, tp3_price], ["#00E676", "#00C853", "#00B0FF"]), 1):
+        # Spread TP annotations safely
+        tp_offsets = [-15, -30, -45]
+        for idx, (tp_val, tp_color, ay_val) in enumerate(zip([tp1_price, tp2_price, tp3_price], ["#00E676", "#00C853", "#00B0FF"], tp_offsets), 1):
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_val, y1=tp_val, line=dict(color=tp_color, width=2, dash="dot"))
-            fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_val, text=f"🎯 TP{idx}", showarrow=True, arrowhead=2, ax=-30, ay=-12*idx, bgcolor=tp_color, font=dict(color="black" if idx<3 else "white", size=10, family="Arial Black"))
+            fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_val, text=f"🎯 TP{idx}", showarrow=True, arrowhead=2, ax=-25, ay=ay_val, bgcolor=tp_color, font=dict(color="black" if idx<3 else "white", size=9, family="Arial Black"))
 
         fig.update_layout(
-            height=580, template="plotly_dark", xaxis_rangeslider_visible=False,
+            height=600, template="plotly_dark", xaxis_rangeslider_visible=False,
             margin=dict(l=2, r=2, t=10, b=2), 
             yaxis=dict(side="right", gridcolor="#222222"), 
             xaxis=dict(gridcolor="#222222"),
