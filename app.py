@@ -38,6 +38,30 @@ def fetch_available_coins():
         "MATIC/USDT", "DOT/USDT", "SHIB/USDT", "UNI/USDT", "APT/USDT"
     ])
 
+# --- NEW: Multi-Coin Ticker/Watchlist Data Fetcher ---
+@st.cache_data(ttl=10)
+def fetch_watchlist_tickers(symbols):
+    ticker_data = []
+    try:
+        url = "https://api.binance.com/api/v3/ticker/24hr"
+        response = requests.get(url, timeout=3)
+        if response.status_code == 200:
+            data = response.json()
+            data_dict = {item['symbol']: item for item in data}
+            for sym in symbols:
+                clean_sym = sym.replace("/", "")
+                if clean_sym in data_dict:
+                    info = data_dict[clean_sym]
+                    ticker_data.append({
+                        "Symbol": sym,
+                        "Price": float(info['lastPrice']),
+                        "Change 24h (%)": float(info['priceChangePercent']),
+                        "Volume 24h": float(info['quoteVolume'])
+                    })
+    except:
+        pass
+    return pd.DataFrame(ticker_data)
+
 # 3. Strategy Definitions
 STRATEGIES = {
     "1. Institutional Order Block (OB) + FVG": "Trading institutional footprints & Fair Value Gaps.",
@@ -85,7 +109,7 @@ def fetch_order_book_metrics(symbol):
     except:
         return 50.0, 50.0
 
-# 6. Advanced Candle Pattern Detection (Engulfing & Pin Bar)
+# 6. Advanced Candle Pattern Detection
 def detect_candle_patterns(df):
     if len(df) < 2:
         return "None"
@@ -158,7 +182,6 @@ def calculate_advanced_metrics(df):
     resistances = sorted(list(set(resistances)))[-2:]
     supports = sorted(list(set(supports)))[:2]
     
-    # --- NEW: Liquidity Pools (Buy-side & Sell-side Stop clusters) ---
     buy_side_liquidity = max(highs) * 1.008 if len(highs) > 0 else closes[-1] * 1.01
     sell_side_liquidity = min(lows) * 0.992 if len(lows) > 0 else closes[-1] * 0.99
 
@@ -302,6 +325,18 @@ st.sidebar.progress(ask_p / 100, text=f"Sellers (Asks): {ask_p:.1f}%")
 col1, col2 = st.columns([3, 1])
 
 with col1:
+    # --- NEW: Multi-Coin Watchlist Widget ---
+    st.markdown("### ⚡ Multi-Coin Watchlist & Market Overview")
+    default_watchlist = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", selected_coin]
+    unique_watchlist = sorted(list(set(default_watchlist)))
+    df_watchlist = fetch_watchlist_tickers(unique_watchlist)
+    if not df_watchlist.empty:
+        st.dataframe(df_watchlist.style.format({
+            "Price": "${:,.4f}",
+            "Change 24h (%)": "{:+.2f}%",
+            "Volume 24h": "${:,.2f}"
+        }), use_container_width=True, hide_index=True)
+
     df = fetch_chart_data(selected_coin, timeframe=timeframe)
     if not df.empty:
         df, supports, resistances, breakouts, fvgs, poc_price, bs_liq, ss_liq = calculate_advanced_metrics(df)
@@ -342,7 +377,6 @@ with col1:
         mtf_c2.metric("1h Trend (Structure)", trend_1h)
         mtf_c3.metric("4h Trend (Macro Direction)", trend_4h)
 
-        # --- NEW: Economic Calendar & News High-Impact Widget ---
         st.markdown("### 📰 High-Impact Economic Calendar & News Alerts")
         news_c1, news_c2, news_c3 = st.columns(3)
         news_c1.info("🇺🇸 **US Core CPI m/m**\n🕒 Today, 6:30 PM | 🔴 High Impact")
@@ -358,27 +392,22 @@ with col1:
             name='Candles'
         )])
         
-        # EMAs
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#00D2FF', width=2)))
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=2)))
         
-        # VPVR Point of Control (POC)
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=poc_price, y1=poc_price, line=dict(color="#FFD700", width=2, dash="dashdot"))
         fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/2)], y=poc_price, text=f"⭐ VPVR POC: ${poc_price:,.4f}", showarrow=False, yshift=15, font=dict(color="#FFD700", size=9, family="Arial Black"))
 
-        # --- NEW: Liquidity Pool Lines on Chart ---
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=bs_liq, y1=bs_liq, line=dict(color="#E040FB", width=1.5, dash="dot"))
         fig.add_annotation(x=df['timestamp'].iloc[-3], y=bs_liq, text="💧 Buy-Side Liquidity Pool", showarrow=False, yshift=12, font=dict(color="#E040FB", size=9, family="Arial Black"))
 
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=ss_liq, y1=ss_liq, line=dict(color="#00E5FF", width=1.5, dash="dot"))
         fig.add_annotation(x=df['timestamp'].iloc[-3], y=ss_liq, text="💧 Sell-Side Liquidity Pool", showarrow=False, yshift=-14, font=dict(color="#00E5FF", size=9, family="Arial Black"))
 
-        # Support Zones
         for sup in supports:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=2, dash="dash"))
             fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/5)], y=sup, text=f"SUP: ${sup:,.4f}", showarrow=False, yshift=-14, font=dict(color="#00C853", size=9, family="Arial Black"))
 
-        # Resistance Zones
         for res in resistances:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=2, dash="dash"))
             fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/5)], y=res, text=f"RES: ${res:,.4f}", showarrow=False, yshift=16, font=dict(color="#D50000", size=9, family="Arial Black"))
