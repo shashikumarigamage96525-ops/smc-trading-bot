@@ -38,7 +38,7 @@ def fetch_available_coins():
         "MATIC/USDT", "DOT/USDT", "SHIB/USDT", "UNI/USDT", "APT/USDT"
     ])
 
-# --- NEW: Multi-Coin Ticker/Watchlist Data Fetcher ---
+# Multi-Coin Ticker/Watchlist Data Fetcher
 @st.cache_data(ttl=10)
 def fetch_watchlist_tickers(symbols):
     ticker_data = []
@@ -55,12 +55,12 @@ def fetch_watchlist_tickers(symbols):
                     ticker_data.append({
                         "Symbol": sym,
                         "Price": float(info['lastPrice']),
-                        "Change 24h (%)": float(info['priceChangePercent']),
-                        "Volume 24h": float(info['quoteVolume'])
+                        "Change": float(info['priceChangePercent']),
+                        "Volume": float(info['quoteVolume'])
                     })
     except:
         pass
-    return pd.DataFrame(ticker_data)
+    return ticker_data
 
 # 3. Strategy Definitions
 STRATEGIES = {
@@ -155,7 +155,6 @@ def calculate_advanced_metrics(df):
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     df['RSI'] = 100 - (100 / (1 + (gain / loss)))
     
-    # VPVR Point of Control (POC)
     price_bins = pd.cut(df['close'], bins=15)
     vol_profile = df.groupby(price_bins, observed=False)['volume'].sum()
     if not vol_profile.empty:
@@ -325,17 +324,22 @@ st.sidebar.progress(ask_p / 100, text=f"Sellers (Asks): {ask_p:.1f}%")
 col1, col2 = st.columns([3, 1])
 
 with col1:
-    # --- NEW: Multi-Coin Watchlist Widget ---
+    # --- FIXED & ENHANCED: Multi-Coin Watchlist Cards ---
     st.markdown("### ⚡ Multi-Coin Watchlist & Market Overview")
-    default_watchlist = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", selected_coin]
-    unique_watchlist = sorted(list(set(default_watchlist)))
-    df_watchlist = fetch_watchlist_tickers(unique_watchlist)
-    if not df_watchlist.empty:
-        st.dataframe(df_watchlist.style.format({
-            "Price": "${:,.4f}",
-            "Change 24h (%)": "{:+.2f}%",
-            "Volume 24h": "${:,.2f}"
-        }), use_container_width=True, hide_index=True)
+    watchlist_symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", selected_coin]
+    unique_watchlist = sorted(list(set(watchlist_symbols)))
+    
+    tickers_list = fetch_watchlist_tickers(unique_watchlist)
+    if tickers_list:
+        cols_w = st.cyc_cols if hasattr(st, "cyc_cols") else st.columns(3)
+        for idx, t in enumerate(tickers_list):
+            c_target = st.columns(3)[idx % 3]
+            chg_color = "🟢" if t['Change'] >= 0 else "🔴"
+            c_target.markdown(f"**{t['Symbol']}**\n\n💰 `${t['Price']:,.4f}`\n\n{chg_color} `{t['Change']:+.2f}%`")
+    else:
+        st.info("Loading watchlisted assets...")
+
+    st.divider()
 
     df = fetch_chart_data(selected_coin, timeframe=timeframe)
     if not df.empty:
