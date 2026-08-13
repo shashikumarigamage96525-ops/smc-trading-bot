@@ -85,7 +85,46 @@ def fetch_order_book_metrics(symbol):
     except:
         return 50.0, 50.0
 
-# 6. Indicators, S/R, Breakouts & Smart FVG Engine
+# 6. Advanced Candle Pattern Detection (Engulfing & Pin Bar)
+def detect_candle_patterns(df):
+    if len(df) < 2:
+        return "None"
+    
+    curr_o, curr_c, curr_h, curr_l = df['open'].iloc[-1], df['close'].iloc[-1], df['high'].iloc[-1], df['low'].iloc[-1]
+    prev_o, prev_c = df['open'].iloc[-2], df['close'].iloc[-2]
+    
+    # Bullish Engulfing
+    if curr_c > curr_o and prev_c < prev_o and curr_c >= prev_o and curr_o <= prev_c:
+        return "Bullish Engulfing 🟢"
+    # Bearish Engulfing
+    elif curr_c < curr_o and prev_c > prev_o and curr_c <= prev_o and curr_o >= prev_c:
+        return "Bearish Engulfing 🔴"
+    
+    # Pin Bar / Hammer detection
+    body = abs(curr_c - curr_o)
+    total_range = curr_h - curr_l
+    if total_range > 0:
+        upper_shadow = curr_h - max(curr_c, curr_o)
+        lower_shadow = min(curr_c, curr_o) - curr_l
+        
+        if lower_shadow > body * 2 and upper_shadow < body:
+            return "Bullish Pin Bar (Hammer) 🟢"
+        elif upper_shadow > body * 2 and lower_shadow < body:
+            return "Bearish Pin Bar (Shooting Star) 🔴"
+            
+    return "Neutral / Normal"
+
+# 7. Telegram Alert Sender Function
+def send_telegram_alert(token, chat_id, message):
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+        requests.post(url, json=payload, timeout=3)
+        return True
+    except:
+        return False
+
+# 8. Indicators, S/R, Breakouts & Smart FVG Engine
 def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
@@ -159,7 +198,7 @@ def calculate_advanced_metrics(df):
             
     return df, supports, resistances, breakouts, selected_fvg
 
-# 7. Gatekeeper Checklist Evaluation Function
+# 9. Gatekeeper Checklist Evaluation Function
 def evaluate_gatekeeper_checklist(symbol, live_price, ema_50, rsi_val):
     return {
         "1. Trend Direction (EMA Structure)": True if live_price > ema_50 else False,
@@ -217,6 +256,13 @@ units = risk_usd / abs(entry_price - sl_price) if abs(entry_price - sl_price) > 
 
 st.sidebar.info(f"💡 Risk: **${risk_usd:.2f}** | Size: **{units:,.2f} units**")
 
+# --- TELEGRAM WEBHOOK CONFIG (SIDEBAR) ---
+st.sidebar.divider()
+st.sidebar.subheader("📢 Telegram Alert Integration")
+enable_tg = st.sidebar.checkbox("Enable Telegram Notifications")
+tg_token = st.sidebar.text_input("Bot Token:", type="password")
+tg_chat_id = st.sidebar.text_input("Chat ID:")
+
 # --- LIVE ORDER BOOK PRESSURE ---
 bid_p, ask_p = fetch_order_book_metrics(selected_coin)
 
@@ -236,22 +282,25 @@ with col1:
         rsi_val = df['RSI'].iloc[-1]
         ema_50 = df['EMA_50'].iloc[-1]
         ema_200 = df['EMA_200'].iloc[-1]
+        candle_pattern = detect_candle_patterns(df)
         
         df_higher = fetch_chart_data(selected_coin, timeframe='4h', limit=50)
         higher_trend = "BULLISH" if not df_higher.empty and df_higher['close'].iloc[-1] > df_higher['close'].ewm(span=50).mean().iloc[-1] else "BEARISH"
         
         score = 0
-        if "LONG" in trade_type and live_price > ema_50: score += 25
-        if "SHORT" in trade_type and live_price < ema_50: score += 25
-        if "LONG" in trade_type and bid_p > 50: score += 25
-        if "SHORT" in trade_type and ask_p > 50: score += 25
-        if ("LONG" in trade_type and higher_trend == "BULLISH") or ("SHORT" in trade_type and higher_trend == "BEARISH"): score += 25
-        if 30 < rsi_val < 70: score += 25
+        if "LONG" in trade_type and live_price > ema_50: score += 20
+        if "SHORT" in trade_type and live_price < ema_50: score += 20
+        if "LONG" in trade_type and bid_p > 50: score += 20
+        if "SHORT" in trade_type and ask_p > 50: score += 20
+        if ("LONG" in trade_type and higher_trend == "BULLISH") or ("SHORT" in trade_type and higher_trend == "BEARISH"): score += 20
+        if 30 < rsi_val < 70: score += 20
+        if ("LONG" in trade_type and "Bullish" in candle_pattern) or ("SHORT" in trade_type and "Bearish" in candle_pattern): score += 20
+        score = min(score, 100)
 
         sc1, sc2, sc3, sc4 = st.columns(4)
         sc1.metric("Live Price", f"${live_price:,.4f}")
         sc2.metric("RSI (14)", f"{rsi_val:.1f}")
-        sc3.metric("4H Trend", higher_trend)
+        sc3.metric("Candle Pattern", candle_pattern)
         sc4.metric("Confidence Score", f"{score}%", "A+ Grade" if score >= 75 else "Moderate")
 
         st.subheader(f"📊 Smart Trend-Aware Chart: {selected_coin} [{timeframe}]")
@@ -321,7 +370,7 @@ with col1:
         )
         st.plotly_chart(fig, use_container_width=True)
         
-        # --- CHART LEGEND & LIVE PRICE GUIDE (UPDATED WITH FVG RANGE) ---
+        # --- CHART LEGEND & LIVE PRICE GUIDE ---
         st.markdown("### 🗺️ Chart Line Guide & Live Price Levels")
         
         guide_col1, guide_col2, guide_col3 = st.columns(3)
@@ -345,6 +394,9 @@ with col1:
 
         if score >= 75:
             st.success(f"🚀 **HIGH CONFIDENCE SETUP ({score}%):** Strong confluence for execution!")
+            if enable_tg and tg_token and tg_chat_id:
+                msg = f"🚀 *HIGH CONFIDENCE TRADE SETUP*\n\nAsset: `{selected_coin}`\nType: `{trade_type}`\nScore: `{score}%`\nEntry: `${entry_price}`\nSL: `${sl_price}`\nTP1: `${tp1_price}`"
+                send_telegram_alert(tg_token, tg_chat_id, msg)
         else:
             st.warning(f"⚠️ **MODERATE CONFIDENCE ({score}%):** Exercise caution or wait for clearer signals.")
     else:
