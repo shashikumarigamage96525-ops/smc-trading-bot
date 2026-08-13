@@ -1,12 +1,11 @@
 import streamlit as st
-import ccxt
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import requests
 from streamlit_autorefresh import st_autorefresh
 
-# 1. Page Configuration & Setup (Mobile Optimized Full Width)
+# 1. Page Configuration & Setup
 st.set_page_config(
     page_title="Ultimate Institutional Trading Terminal",
     page_icon="⚡",
@@ -16,14 +15,29 @@ st.set_page_config(
 # Auto-refresh every 5 seconds for live price movement
 count = st_autorefresh(interval=5000, limit=None, key="live_terminal_counter")
 
-# 2. Expanded Binance Searchable Coin List
-@st.cache_data(ttl=300)
+# 2. Robust Coin Fetcher with Mega Fallback List (No 'No Results' Issue)
+@st.cache_data(ttl=3600)
 def fetch_available_coins():
-    return [
+    try:
+        url = "https://api.binance.com/api/v3/exchangeInfo"
+        response = requests.get(url, timeout=3)
+        if response.status_code == 200:
+            data = response.json()
+            symbols = [s['symbol'] for s in data['symbols'] if s['quoteAsset'] == 'USDT' and s['status'] == 'TRADING']
+            formatted_symbols = [f"{s[:-4]}/USDT" for s in symbols]
+            if formatted_symbols:
+                return sorted(formatted_symbols)
+    except:
+        pass
+    
+    # Fallback List (ACE, RENDER, SUI ඇතුළු ජනප්‍රිය Altcoins සියල්ල මෙහි ඇත)
+    return sorted([
         "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", 
-        "ADA/USDT", "DOGE/USDT", "SUI/USDT", "PEPE/USDT", "AVAX/USDT",
-        "LINK/USDT", "NEAR/USDT", "RENDER/USDT", "FET/USDT", "INJ/USDT"
-    ]
+        "ADA/USDT", "DOGE/USDT", "SUI/USDT", "PEPE/USDT", "ACE/USDT",
+        "AVAX/USDT", "LINK/USDT", "NEAR/USDT", "RENDER/USDT", "FET/USDT", 
+        "INJ/USDT", "OP/USDT", "ARB/USDT", "FTM/USDT", "ICP/USDT",
+        "MATIC/USDT", "DOT/USDT", "SHIB/USDT", "UNI/USDT", "APT/USDT"
+    ])
 
 # 3. Strategy Definitions
 STRATEGIES = {
@@ -77,7 +91,6 @@ def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
     
-    # RSI
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -101,7 +114,6 @@ def calculate_advanced_metrics(df):
     resistances = sorted(list(set(resistances)))[-2:]
     supports = sorted(list(set(supports)))[:2]
     
-    # Breakout Detection
     if resistances and len(closes) > 1:
         last_res = resistances[-1]
         for i in range(len(df) - 8, len(df)):
@@ -114,7 +126,6 @@ def calculate_advanced_metrics(df):
             if closes[i] < last_sup and closes[i-1] >= last_sup:
                 breakouts.append({'time': times[i], 'price': closes[i], 'type': 'Bearish Breakdown'})
 
-    # Fair Value Gaps (FVG)
     fvg_list = []
     for i in range(1, len(df) - 1):
         if df['low'].iloc[i+1] > df['high'].iloc[i-1]:
@@ -142,8 +153,9 @@ st.markdown("Live analytics, massive crystal-clear mobile chart, multi-TP target
 st.sidebar.header("🎛 Control & Intelligence Hub")
 
 all_symbols = fetch_available_coins()
-default_index = all_symbols.index("BTC/USDT") if "BTC/USDT" in all_symbols else 0
-selected_coin = st.sidebar.selectbox("🔍 Select Asset:", all_symbols, index=default_index)
+default_index = all_symbols.index("ACE/USDT") if "ACE/USDT" in all_symbols else (all_symbols.index("BTC/USDT") if "BTC/USDT" in all_symbols else 0)
+
+selected_coin = st.sidebar.selectbox("🔍 Select Asset (Searchable):", all_symbols, index=default_index)
 timeframe = st.sidebar.selectbox("Execution Timeframe:", ["5m", "15m", "1h", "4h"], index=1)
 
 st.sidebar.divider()
@@ -201,11 +213,9 @@ with col1:
         ema_50 = df['EMA_50'].iloc[-1]
         ema_200 = df['EMA_200'].iloc[-1]
         
-        # Higher Timeframe Trend
         df_higher = fetch_chart_data(selected_coin, timeframe='4h', limit=50)
         higher_trend = "BULLISH" if not df_higher.empty and df_higher['close'].iloc[-1] > df_higher['close'].ewm(span=50).mean().iloc[-1] else "BEARISH"
         
-        # Scoring System
         score = 0
         if "LONG" in trade_type and live_price > ema_50: score += 25
         if "SHORT" in trade_type and live_price < ema_50: score += 25
@@ -214,7 +224,6 @@ with col1:
         if ("LONG" in trade_type and higher_trend == "BULLISH") or ("SHORT" in trade_type and higher_trend == "BEARISH"): score += 25
         if 30 < rsi_val < 70: score += 25
 
-        # Metric Header
         sc1, sc2, sc3, sc4 = st.columns(4)
         sc1.metric("Live Price", f"${live_price:,.4f}")
         sc2.metric("RSI (14)", f"{rsi_val:.1f}")
@@ -223,7 +232,6 @@ with col1:
 
         st.subheader(f"📊 Huge Live Chart: {selected_coin} [{timeframe}]")
         
-        # --- HUGE CLEAR MOBILE-FRIENDLY CANDLESTICK CHART ---
         fig = go.Figure(data=[go.Candlestick(
             x=df['timestamp'], open=df['open'], high=df['high'], low=df['low'], close=df['close'],
             increasing_line_color='#00F686', increasing_fillcolor='#00F686',
@@ -231,33 +239,26 @@ with col1:
             name='Candles'
         )])
         
-        # EMAs
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#00D2FF', width=2)))
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=2)))
         
-        # Support Zones (Green Lines)
         for sup in supports:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=2, dash="dash"))
             fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=sup, text=f"SUPPORT: ${sup:,.4f}", showarrow=False, yshift=-12, font=dict(color="#00C853", size=10, family="Arial Black"))
 
-        # Resistance Zones (Red Lines)
         for res in resistances:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=2, dash="dash"))
             fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=res, text=f"RESISTANCE: ${res:,.4f}", showarrow=False, yshift=14, font=dict(color="#D50000", size=10, family="Arial Black"))
 
-        # Breakouts
         for b in breakouts:
             fig.add_annotation(x=b['time'], y=b['price'], text=f"⚡ {b['type']}", showarrow=True, arrowhead=2, ax=0, ay=-35, bgcolor="#FFCC00", font=dict(color="black", size=10, family="Arial Black"))
 
-        # Fair Value Gaps (FVG)
         for fvg in fvgs[-2:]:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=fvg['price'], y1=fvg['price'], line=dict(color="#9C27B0", width=1.5, dash="dot"))
             fig.add_annotation(x=fvg['time'], y=fvg['price'], text=f"✨ {fvg['type']}", showarrow=False, font=dict(color="#9C27B0", size=9))
 
-        # Trade Setup: Entry, SL, TP1, TP2, TP3
         t_label = "LONG" if "LONG" in trade_type else "SHORT"
         
-        # Entry Box Zone
         fig.add_hrect(
             y0=entry_price*0.998, y1=entry_price*1.002, 
             fillcolor="rgba(0, 210, 255, 0.25)", line_width=1, line_color="#00D2FF",
@@ -265,16 +266,13 @@ with col1:
             annotation_font=dict(color="#00D2FF", size=10, family="Arial Black")
         )
         
-        # Stop Loss
         fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF3B30", width=2.5, dash="dot"))
         fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text="🛑 SL", showarrow=True, arrowhead=2, ax=-30, ay=12, bgcolor="#FF3B30", font=dict(color="white", size=10, family="Arial Black"))
 
-        # Take Profits (TP1, TP2, TP3)
         for idx, (tp_val, tp_color) in enumerate(zip([tp1_price, tp2_price, tp3_price], ["#00E676", "#00C853", "#00B0FF"]), 1):
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_val, y1=tp_val, line=dict(color=tp_color, width=2, dash="dot"))
             fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_val, text=f"🎯 TP{idx}", showarrow=True, arrowhead=2, ax=-30, ay=-12*idx, bgcolor=tp_color, font=dict(color="black" if idx<3 else "white", size=10, family="Arial Black"))
 
-        # Larger Height for Ultimate Mobile Visibility
         fig.update_layout(
             height=580, template="plotly_dark", xaxis_rangeslider_visible=False,
             margin=dict(l=2, r=2, t=10, b=2), 
@@ -294,7 +292,6 @@ with col1:
 with col2:
     st.subheader("🔒 Gatekeeper Checklist")
     
-    # Evaluate Checklist using live metrics
     checklist_status = evaluate_gatekeeper_checklist(selected_coin, live_price, ema_50, rsi_val)
     all_passed = True
     for step, passed in checklist_status.items():
