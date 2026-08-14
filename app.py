@@ -9,7 +9,7 @@ from datetime import datetime
 
 # 1. Page Configuration & Setup
 st.set_page_config(
-    page_title="Ultimate Institutional Trading Terminal V2.2",
+    page_title="Ultimate Institutional Trading Terminal V2.4",
     page_icon="⚡",
     layout="wide"
 )
@@ -17,7 +17,7 @@ st.set_page_config(
 # Auto-refresh every 5 seconds for live price movement
 count = st_autorefresh(interval=5000, limit=None, key="live_terminal_counter")
 
-# Session State Initialization for V2.2
+# Session State Initialization
 if 'trade_journal' not in st.session_state:
     st.session_state['trade_journal'] = []
 if 'signal_history' not in st.session_state:
@@ -49,7 +49,6 @@ def fetch_available_coins():
         "INJ/USDT", "OP/USDT", "ARB/USDT", "FTM/USDT", "ICP/USDT"
     ])
 
-# Multi-Coin Ticker Data Fetcher
 @st.cache_data(ttl=10)
 def fetch_watchlist_tickers(symbols):
     ticker_data = []
@@ -83,15 +82,13 @@ def fetch_watchlist_tickers(symbols):
             
     return ticker_data
 
-# Strategy Definitions
 STRATEGIES = {
-    "1. MSNR Smart Levels & Fresh Zones": "Malaysian S&R automatic fresh & unfresh level mapping.",
+    "1. MSNR Zone Strategy (Pullback Style)": "Malaysian S&R zone rectangles for fresh & unfresh levels.",
     "2. QM Pattern VIP Scanner": "Quasimodo Pattern detection with entry zone alerts.",
     "3. Institutional Order Block + FVG": "Trading institutional footprints & Fair Value Gaps.",
     "4. Liquidity Sweep & MSS": "Grabbing retail stops then reversing."
 }
 
-# Fetch OHLCV Data
 def fetch_chart_data(symbol, timeframe='1h', limit=150):
     try:
         clean_symbol = symbol.replace("/", "")
@@ -115,7 +112,6 @@ def fetch_chart_data(symbol, timeframe='1h', limit=150):
     except:
         return pd.DataFrame()
 
-# Order Book Depth Fetcher
 def fetch_order_book_metrics(symbol):
     try:
         clean_symbol = symbol.replace("/", "")
@@ -130,7 +126,6 @@ def fetch_order_book_metrics(symbol):
     except:
         return 50.0, 50.0
 
-# Whale Transactions Tracker
 @st.cache_data(ttl=5)
 def fetch_whale_transactions(symbol, fallback_price, threshold_usd=5000):
     whale_trades = []
@@ -166,7 +161,6 @@ def fetch_whale_transactions(symbol, fallback_price, threshold_usd=5000):
         })
     return whale_trades
 
-# Telegram Alert Sender
 def send_telegram_alert(message):
     try:
         if "telegram" in st.secrets and "token" in st.secrets["telegram"] and "chat_id" in st.secrets["telegram"]:
@@ -180,28 +174,30 @@ def send_telegram_alert(message):
         pass
     return False
 
-# MSNR (Malaysian S&R) Smart Levels Engine
-def calculate_msnr_levels(df):
+# MSNR Zone Engine (Returns price zones with range for rectangular box rendering)
+def calculate_msnr_zones(df):
     highs = df['high'].values
     lows = df['low'].values
     fresh_supports, unfresh_supports, fresh_resistances, unfresh_resistances = [], [], [], []
+    zone_buffer = df['close'].iloc[-1] * 0.003  # 0.3% range for zone thickness
 
     for i in range(3, len(df) - 3):
         if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
             level = highs[i]
             tested = any(highs[j] >= level >= lows[j] for j in range(i + 3, len(df)))
-            if tested: unfresh_resistances.append(level)
-            else: fresh_resistances.append(level)
+            zone = {'low': level - zone_buffer, 'high': level + zone_buffer, 'price': level}
+            if tested: unfresh_resistances.append(zone)
+            else: fresh_resistances.append(zone)
 
         if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
             level = lows[i]
             tested = any(highs[j] >= level >= lows[j] for j in range(i + 3, len(df)))
-            if tested: unfresh_supports.append(level)
-            else: fresh_supports.append(level)
+            zone = {'low': level - zone_buffer, 'high': level + zone_buffer, 'price': level}
+            if tested: unfresh_supports.append(zone)
+            else: fresh_supports.append(zone)
 
     return fresh_supports, unfresh_supports, fresh_resistances, unfresh_resistances
 
-# QM Pattern Scanner Engine
 def detect_qm_pattern(df):
     if len(df) < 15: return "Searching...", None
     highs, lows, closes = df['high'].values, df['low'].values, df['close'].values
@@ -218,7 +214,6 @@ def detect_qm_pattern(df):
 
     return "Searching for QM Formation...", None
 
-# Advanced Indicators, FVG & Liquidity Engine
 def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
@@ -238,20 +233,11 @@ def calculate_advanced_metrics(df):
     vol_profile = df.groupby(price_bins, observed=False)['volume'].sum()
     poc_price = df['close'].mean() if vol_profile.empty else (vol_profile.idxmax().left + vol_profile.idxmax().right) / 2
 
-    highs, lows = df['high'].values, df['low'].values
-    buy_side_liquidity = max(highs[-20:]) if len(highs) >= 20 else max(highs)
-    sell_side_liquidity = min(lows[-20:]) if len(lows) >= 20 else min(lows)
-
-    bullish_fvgs = []
-    for i in range(1, len(df) - 1):
-        if df['low'].iloc[i+1] > df['high'].iloc[i-1]:
-            bullish_fvgs.append({'type': 'Bullish FVG', 'low': df['high'].iloc[i-1], 'high': df['low'].iloc[i+1], 'time': df['timestamp'].iloc[i]})
-
-    return df, poc_price, buy_side_liquidity, sell_side_liquidity, bullish_fvgs
+    return df, poc_price
 
 # --- UI LAYOUT ---
-st.title("⚡ Ultimate Institutional Trading Terminal V2.2")
-st.markdown("Equipped with MSNR Smart Levels, Buying Power Margin Dashboard, QM Scanner, Liquidity Pools, FVG & Storyline.")
+st.title("⚡ Ultimate Institutional Trading Terminal V2.4")
+st.markdown("Pullback Strategy Terminal: Clean Zone Rectangles for MSNR Fresh & Unfresh Levels.")
 
 st.sidebar.header("🎛 Control & Intelligence Hub")
 
@@ -261,7 +247,7 @@ default_index = all_symbols.index("ACE/USDT") if "ACE/USDT" in all_symbols else 
 selected_coin = st.sidebar.selectbox("🔍 Select Asset:", all_symbols, index=default_index)
 timeframe = st.sidebar.selectbox("Execution Timeframe:", ["5m", "15m", "1h", "4h"], index=1)
 
-chart_type_mode = st.sidebar.radio("📊 Chart Display Style:", ["Candlestick", "Clean Line Chart (MSNR Mode)"], horizontal=True)
+chart_type_mode = st.sidebar.radio("📊 Chart Display Style:", ["Candlestick", "Clean Line Chart (Zone Mode)"], horizontal=True)
 
 st.sidebar.divider()
 selected_strategy_name = st.sidebar.selectbox("Select Strategy:", list(STRATEGIES.keys()))
@@ -287,8 +273,8 @@ enable_atr_sl = st.sidebar.checkbox("Activate ATR-based SL/TP Engine", value=Tru
 atr_multiplier = st.sidebar.slider("ATR Multiplier:", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
 
 st.sidebar.divider()
-st.sidebar.subheader("📈 Trade Configuration & Targets")
-trade_type = st.sidebar.radio("Direction:", ["LONG (Bullish)", "SHORT (Bearish)"], horizontal=True)
+st.sidebar.subheader("📈 Trade Configuration & Pullback Setup")
+trade_type = st.sidebar.radio("Direction:", ["LONG (Bullish Pullback)", "SHORT (Bearish Pullback)"], horizontal=True)
 
 p_step = 0.0001 if current_live_price < 10 else 0.1
 entry_price = st.sidebar.number_input("Entry Price:", value=float(current_live_price), format="%.4f", step=p_step)
@@ -300,22 +286,22 @@ if enable_atr_sl:
     calc_tp3 = entry_price + (atr_multiplier * 4.0 * current_atr) if "LONG" in trade_type else entry_price - (atr_multiplier * 4.0 * current_atr)
     
     sl_price = st.sidebar.number_input("Stop Loss (SL):", value=float(calc_sl), format="%.4f", step=p_step)
-    tp1_price = st.sidebar.number_input("Take Profit 1 (TP1):", value=float(calc_tp1), format="%.4f", step=p_step)
-    tp2_price = st.sidebar.number_input("Take Profit 2 (TP2):", value=float(calc_tp2), format="%.4f", step=p_step)
-    tp3_price = st.sidebar.number_input("Take Profit 3 (TP3):", value=float(calc_tp3), format="%.4f", step=p_step)
+    tp1_price = st.sidebar.number_input("Take Profit 1 (Target):", value=float(calc_tp1), format="%.4f", step=p_step)
+    tp2_price = st.sidebar.number_input("Take Profit 2:", value=float(calc_tp2), format="%.4f", step=p_step)
+    tp3_price = st.sidebar.number_input("Take Profit 3:", value=float(calc_tp3), format="%.4f", step=p_step)
 else:
     sl_price = st.sidebar.number_input("Stop Loss (SL):", value=float(entry_price * 0.99), format="%.4f", step=p_step)
-    tp1_price = st.sidebar.number_input("Take Profit 1 (TP1):", value=float(entry_price * 1.02), format="%.4f", step=p_step)
-    tp2_price = st.sidebar.number_input("Take Profit 2 (TP2):", value=float(entry_price * 1.04), format="%.4f", step=p_step)
-    tp3_price = st.sidebar.number_input("Take Profit 3 (TP3):", value=float(entry_price * 1.06), format="%.4f", step=p_step)
+    tp1_price = st.sidebar.number_input("Take Profit 1 (Target):", value=float(entry_price * 1.02), format="%.4f", step=p_step)
+    tp2_price = st.sidebar.number_input("Take Profit 2:", value=float(entry_price * 1.04), format="%.4f", step=p_step)
+    tp3_price = st.sidebar.number_input("Take Profit 3:", value=float(entry_price * 1.06), format="%.4f", step=p_step)
 
 risk_distance = abs(entry_price - sl_price)
 reward_distance = abs(tp1_price - entry_price)
 rrr_ratio = reward_distance / risk_distance if risk_distance > 0 else 0.0
 
-st.sidebar.info(f"⚖️ **Est. RRR (TP1):** `1:{rrr_ratio:.2f}`")
+st.sidebar.info(f"⚖️ **Est. RRR (Target):** `1:{rrr_ratio:.2f}`")
 
-# SNR Rate & Custom Price Alerts
+# SNR Rate & Custom Alerts
 st.sidebar.divider()
 st.sidebar.subheader("🔔 SNR Rate & Custom Alerts")
 custom_alert_rate = st.sidebar.number_input("Set Target Price Alert:", value=float(current_live_price * 1.01), format="%.4f", step=p_step)
@@ -324,7 +310,6 @@ if st.sidebar.button("Add Custom Price Alert"):
     st.sidebar.success(f"Alert set for {selected_coin} at ${custom_alert_rate:.4f}!")
     send_telegram_alert(f"🔔 *CUSTOM SNR ALERT SET*\nAsset: `{selected_coin}`\nTarget Rate: `${custom_alert_rate:.4f}`")
 
-# Order Book Pressure
 bid_p, ask_p = fetch_order_book_metrics(selected_coin)
 
 # --- MAIN DASHBOARD AREA ---
@@ -346,34 +331,33 @@ with col1:
 
     df = fetch_chart_data(selected_coin, timeframe=timeframe)
     if not df.empty:
-        df, poc_price, bs_liq, ss_liq, fvgs = calculate_advanced_metrics(df)
+        df, poc_price = calculate_advanced_metrics(df)
         live_price = df['close'].iloc[-1]
         rsi_val = df['RSI'].iloc[-1]
         ema_50 = df['EMA_50'].iloc[-1]
-        ema_200 = df['EMA_200'].iloc[-1]
         
-        fresh_supports, unfresh_supports, fresh_res, unfresh_res = calculate_msnr_levels(df)
+        fresh_supports, unfresh_supports, fresh_res, unfresh_res = calculate_msnr_zones(df)
         qm_status, qm_level = detect_qm_pattern(df)
 
         sc1, sc2, sc3, sc4 = st.columns(4)
         sc1.metric("Live Price", f"${live_price:,.4f}")
         sc2.metric("RSI (14)", f"{rsi_val:.1f}")
-        sc3.metric("MSNR Fresh Zones", f"{len(fresh_supports) + len(fresh_res)} Active")
-        sc4.metric("QM Scanner", qm_status)
+        sc3.metric("Fresh Zones Active", f"{len(fresh_supports) + len(fresh_res)}")
+        sc4.metric("Setup Status", qm_status)
 
-        # Storyline & Multi-Timeframe Journal
+        # Storyline & Journal
         st.markdown("### 📜 Storyline: Multi-Timeframe Journal & Trend Matrix")
         df_4h = fetch_chart_data(selected_coin, timeframe='4h', limit=50)
         trend_4h = "BULLISH 🟢" if not df_4h.empty and df_4h['close'].iloc[-1] > df_4h['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
         macro_arrow = "⬆️ MACRO UPTREND" if "BULLISH" in trend_4h else "⬇️ MACRO DOWNTREND"
         
-        st.info(f"📌 **Daily/4H Macro Trend Indicator:** `{macro_arrow}` | 15m Execution timeframe loaded below.")
+        st.info(f"📌 **Daily/4H Macro Trend Indicator:** `{macro_arrow}`")
 
-        with st.expander("📝 Storyline Notes & Trade Thesis (Click to expand)", expanded=True):
-            st.session_state['storyline_notes'] = st.text_area("Write down your multi-timeframe thesis:", value=st.session_state['storyline_notes'])
+        with st.expander("📝 Storyline Notes & Pullback Thesis", expanded=False):
+            st.session_state['storyline_notes'] = st.text_area("Write down your pullback trade setup:", value=st.session_state['storyline_notes'])
 
-        # --- MAIN CHART RENDERING WITH ALL FEATURES ---
-        st.subheader(f"📊 Smart MSNR, Liquidity & QM Chart: {selected_coin} [{timeframe}]")
+        # --- MAIN PULLBACK ZONE CHART RENDERING ---
+        st.subheader(f"📊 Pullback Strategy Zone Chart: {selected_coin} [{timeframe}]")
         
         if chart_type_mode == "Candlestick":
             fig = go.Figure(data=[go.Candlestick(
@@ -386,64 +370,56 @@ with col1:
             )])
         
         fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#00D2FF', width=1.5)))
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=1.5)))
 
-        # MSNR Levels
-        for sup in fresh_supports:
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=2.5))
-            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=sup, text=f"🟢 Fresh Support: ${sup:,.4f}", showarrow=False, yshift=-12, font=dict(color="#00C853", size=9, family="Arial Black"))
-        for sup in unfresh_supports:
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#81C784", width=1, dash="dot"))
-
-        for res in fresh_res:
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=2.5))
-            fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=res, text=f"🔴 Fresh Resistance: ${res:,.4f}", showarrow=False, yshift=14, font=dict(color="#D50000", size=9, family="Arial Black"))
-        for res in unfresh_res:
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#E57373", width=1, dash="dot"))
-
-        # Liquidity Pools & POC
-        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=poc_price, y1=poc_price, line=dict(color="#FFD700", width=2, dash="dashdot"))
-        fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/2)], y=poc_price, text=f"⭐ VPVR POC: ${poc_price:,.4f}", showarrow=False, yshift=15, font=dict(color="#FFD700", size=9, family="Arial Black"))
-
-        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=bs_liq, y1=bs_liq, line=dict(color="#E040FB", width=1.5, dash="dot"))
-        fig.add_annotation(x=df['timestamp'].iloc[-3], y=bs_liq, text="💧 Buy-Side Liquidity Pool", showarrow=False, yshift=12, font=dict(color="#E040FB", size=9, family="Arial Black"))
-
-        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=ss_liq, y1=ss_liq, line=dict(color="#00E5FF", width=1.5, dash="dot"))
-        fig.add_annotation(x=df['timestamp'].iloc[-3], y=ss_liq, text="💧 Sell-Side Liquidity Pool", showarrow=False, yshift=-14, font=dict(color="#00E5FF", size=9, family="Arial Black"))
-
-        # FVG Zones
-        for fvg in fvgs:
+        # 1. Fresh Support Zones (තද කොළ පාට කොටු - Solid Dark Green Rectangles)
+        for zone in fresh_supports:
             fig.add_hrect(
-                y0=fvg['low'], y1=fvg['high'],
-                fillcolor="rgba(0, 230, 118, 0.25)", line_width=1.5, line_dash="dot", line_color="#00E676",
-                annotation_text=f"✨ Active FVG (${fvg['low']:,.4f} - ${fvg['high']:,.4f})", 
-                annotation_position="top left", annotation_font=dict(color="#00E676", size=9, family="Arial Black")
+                y0=zone['low'], y1=zone['high'],
+                fillcolor="rgba(0, 200, 83, 0.35)", line_width=1.5, line_color="#00C853",
+                annotation_text=f"🟢 Fresh Support Zone: ${zone['price']:,.4f}", annotation_position="top left",
+                annotation_font=dict(color="#00C853", size=9, family="Arial Black")
             )
 
-        # QM Pattern Zone
-        if qm_level:
+        # 2. Unfresh Support Zones (ළා කොළ පාට කොටු - Light Green Rectangles)
+        for zone in unfresh_supports:
             fig.add_hrect(
-                y0=qm_level*0.995, y1=qm_level*1.005,
-                fillcolor="rgba(255, 215, 0, 0.3)", line_width=2, line_color="#FFD700", line_dash="dash",
-                annotation_text=f"⭐ VIP QM Pattern Zone: ${qm_level:,.4f}", annotation_position="top left",
-                annotation_font=dict(color="#FFD700", size=10, family="Arial Black")
+                y0=zone['low'], y1=zone['high'],
+                fillcolor="rgba(129, 199, 132, 0.15)", line_width=1, line_dash="dot", line_color="#81C784",
+                annotation_text=f"🟢 Unfresh Support: ${zone['price']:,.4f}", annotation_position="top left",
+                annotation_font=dict(color="#81C784", size=8, family="Arial")
             )
 
-        # Trade Entry, SL, TPs
-        t_label = "LONG" if "LONG" in trade_type else "SHORT"
+        # 3. Fresh Resistance Zones (තද රතු පාට කොටු - Solid Dark Red Rectangles)
+        for zone in fresh_res:
+            fig.add_hrect(
+                y0=zone['low'], y1=zone['high'],
+                fillcolor="rgba(213, 0, 0, 0.35)", line_width=1.5, line_color="#D50000",
+                annotation_text=f"🔴 Fresh Resistance Zone: ${zone['price']:,.4f}", annotation_position="top left",
+                annotation_font=dict(color="#D50000", size=9, family="Arial Black")
+            )
+
+        # 4. Unfresh Resistance Zones (ළා රතු පාට කොටු - Light Red Rectangles)
+        for zone in unfresh_res:
+            fig.add_hrect(
+                y0=zone['low'], y1=zone['high'],
+                fillcolor="rgba(229, 115, 115, 0.15)", line_width=1, line_dash="dot", line_color="#E57373",
+                annotation_text=f"🔴 Unfresh Resistance: ${zone['price']:,.4f}", annotation_position="top left",
+                annotation_font=dict(color="#E57373", size=8, family="Arial")
+            )
+
+        # Target & Entry Zone Setup (Pullback Style)
         fig.add_hrect(
             y0=entry_price*0.998, y1=entry_price*1.002, 
-            fillcolor="rgba(0, 210, 255, 0.25)", line_width=1, line_color="#00D2FF",
-            annotation_text=f"🎯 {t_label} ENTRY", annotation_position="bottom left",
-            annotation_font=dict(color="#00D2FF", size=9, family="Arial Black")
+            fillcolor="rgba(0, 210, 255, 0.3)", line_width=2, line_color="#00D2FF",
+            annotation_text=f"🎯 Pullback Entry Zone: ${entry_price:,.4f}", annotation_position="bottom left",
+            annotation_font=dict(color="#00D2FF", size=10, family="Arial Black")
         )
         
-        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF3B30", width=2, dash="dot"))
-        fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text="🛑 SL", showarrow=True, arrowhead=2, ax=-25, ay=15, bgcolor="#FF3B30", font=dict(color="white", size=9, family="Arial Black"))
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF3B30", width=2, dash="dash"))
+        fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text="🛑 Stop-Loss", showarrow=True, arrowhead=2, ax=-25, ay=15, bgcolor="#FF3B30", font=dict(color="white", size=9, family="Arial Black"))
 
-        for idx, (tp_val, tp_color) in enumerate(zip([tp1_price, tp2_price, tp3_price], ["#00E676", "#00C853", "#00B0FF"]), 1):
-            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_val, y1=tp_val, line=dict(color=tp_color, width=2, dash="dot"))
-            fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_val, text=f"🎯 TP{idx}", showarrow=True, arrowhead=2, ax=-25, ay=-15*idx, bgcolor=tp_color, font=dict(color="black" if idx<3 else "white", size=9, family="Arial Black"))
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp1_price, y1=tp1_price, line=dict(color="#00E676", width=2, dash="dash"))
+        fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp1_price, text="🎯 Target", showarrow=True, arrowhead=2, ax=-25, ay=-15, bgcolor="#00E676", font=dict(color="black", size=9, family="Arial Black"))
 
         fig.update_layout(
             height=600, template="plotly_dark", xaxis_rangeslider_visible=False,
@@ -452,23 +428,17 @@ with col1:
         )
         st.plotly_chart(fig, use_container_width=True)
         
-        # Chart Line Guide & Live Price Levels
-        st.markdown("### 🗺️ Chart Line Guide & Live Price Levels")
+        # Guide & Whale Activity
+        st.markdown("### 🗺️ Pullback Strategy Guide & Zone Levels")
         g1, g2, g3 = st.columns(3)
         with g1:
-            st.markdown(f"🟢 **Fresh Supports Active:** {len(fresh_supports)}")
-            st.markdown(f"🔵 **EMA 50:** `${ema_50:,.4f}`")
-            st.markdown(f"🎯 **Entry Price:** `${entry_price:,.4f}`")
+            st.markdown(f"🟢 **Fresh Support Zones:** {len(fresh_supports)}")
         with g2:
-            st.markdown(f"🔴 **Fresh Resistances Active:** {len(fresh_res)}")
-            st.markdown(f"🟠 **EMA 200:** `${ema_200:,.4f}`")
-            st.markdown(f"🛑 **Stop Loss (SL):** `${sl_price:,.4f}`")
+            st.markdown(f"🔴 **Fresh Resistance Zones:** {len(fresh_res)}")
         with g3:
-            st.markdown(f"⭐ **VPVR POC Level:** `${poc_price:,.4f}`")
-            st.markdown(f"💧 **Liquidity Pools:** `${bs_liq:,.4f}` / `${ss_liq:,.4f}`")
+            st.markdown(f"⚖️ **Est. RRR (Target):** `1:{rrr_ratio:.2f}`")
 
-        # Whale Transactions Tracker
-        st.markdown("### 🐋 Live Whale Transactions (Large Orders Tracker)")
+        st.markdown("### 🐋 Live Whale Transactions Tracker")
         st.dataframe(pd.DataFrame(fetch_whale_transactions(selected_coin, current_live_price)), use_container_width=True, hide_index=True)
 
         if st.button("📝 Log Current Signal to History"):
@@ -481,7 +451,7 @@ with col1:
             })
             st.success("Signal logged successfully!")
 
-        st.markdown("### 📈 Signal History & Backtest Engine")
+        st.markdown("### 📈 Signal History")
         if st.session_state['signal_history']:
             st.dataframe(pd.DataFrame(st.session_state['signal_history']), use_container_width=True, hide_index=True)
 
@@ -490,13 +460,12 @@ with col1:
 
 with col2:
     st.subheader("🔒 Gatekeeper Checklist")
-    st.success("✅ MSNR Smart Levels Synced")
+    st.success("✅ Pullback Zones Synced")
     st.success("✅ Buying Power Verified")
     st.success(f"✅ Margin Risk Checked (1:{rrr_ratio:.2f})")
-    st.success("✅ Liquidity & FVG Mapped")
     
     st.divider()
-    st.markdown("### 🟢 STATUS: READY FOR EXECUTION")
+    st.markdown("### 🟢 STATUS: READY")
     
     st.subheader("🔔 Active Custom Alerts")
     if st.session_state['custom_alerts']:
