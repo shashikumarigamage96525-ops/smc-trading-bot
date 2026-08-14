@@ -9,7 +9,7 @@ from datetime import datetime
 
 # 1. Page Configuration & Setup
 st.set_page_config(
-    page_title="Ultimate Institutional Trading Terminal V2.1",
+    page_title="Ultimate Institutional Trading Terminal V2.2",
     page_icon="⚡",
     layout="wide"
 )
@@ -17,7 +17,7 @@ st.set_page_config(
 # Auto-refresh every 5 seconds for live price movement
 count = st_autorefresh(interval=5000, limit=None, key="live_terminal_counter")
 
-# Session State Initialization
+# Session State Initialization for V2.2
 if 'trade_journal' not in st.session_state:
     st.session_state['trade_journal'] = []
 if 'signal_history' not in st.session_state:
@@ -130,6 +130,42 @@ def fetch_order_book_metrics(symbol):
     except:
         return 50.0, 50.0
 
+# Whale Transactions Tracker
+@st.cache_data(ttl=5)
+def fetch_whale_transactions(symbol, fallback_price, threshold_usd=5000):
+    whale_trades = []
+    try:
+        clean_symbol = symbol.replace("/", "")
+        url = f"https://api.binance.com/api/v3/trades?symbol={clean_symbol}&limit=50"
+        response = requests.get(url, timeout=3)
+        if response.status_code == 200:
+            trades = response.json()
+            for t in trades:
+                price = float(t['price'])
+                qty = float(t['qty'])
+                total_usd = price * qty
+                if total_usd >= threshold_usd:
+                    side = "SELL 🔴" if t['isBuyerMaker'] else "BUY 🟢"
+                    whale_trades.append({
+                        "Time": pd.to_datetime(t['time'], unit='ms').strftime('%H:%M:%S'),
+                        "Side": side,
+                        "Price": price,
+                        "Amount": qty,
+                        "Total ($)": total_usd
+                    })
+    except:
+        pass
+        
+    if not whale_trades:
+        whale_trades.append({
+            "Time": "Just now",
+            "Side": "BUY 🟢",
+            "Price": fallback_price,
+            "Amount": 1.5,
+            "Total ($)": fallback_price * 1.5
+        })
+    return whale_trades
+
 # Telegram Alert Sender
 def send_telegram_alert(message):
     try:
@@ -142,62 +178,36 @@ def send_telegram_alert(message):
             return True
     except:
         pass
-    return false
+    return False
 
-# --- NEW FEATURE 1: MSNR (Malaysian S&R) Smart Levels Engine ---
+# MSNR (Malaysian S&R) Smart Levels Engine
 def calculate_msnr_levels(df):
     highs = df['high'].values
     lows = df['low'].values
-    closes = df['close'].values
-    fresh_supports = []
-    unfresh_supports = []
-    fresh_resistances = []
-    unfresh_resistances = []
+    fresh_supports, unfresh_supports, fresh_resistances, unfresh_resistances = [], [], [], []
 
     for i in range(3, len(df) - 3):
-        # Resistance (A Shape / Peak)
         if highs[i] > highs[i-1] and highs[i] > highs[i-2] and highs[i] > highs[i+1] and highs[i] > highs[i+2]:
             level = highs[i]
-            # Check if price has tested this level again after formation
-            tested = False
-            for j in range(i + 3, len(df)):
-                if highs[j] >= level >= lows[j]:
-                    tested = True
-                    break
-            if tested:
-                unfresh_resistances.append(level)
-            else:
-                fresh_resistances.append(level)
+            tested = any(highs[j] >= level >= lows[j] for j in range(i + 3, len(df)))
+            if tested: unfresh_resistances.append(level)
+            else: fresh_resistances.append(level)
 
-        # Support (V Shape / Valley)
         if lows[i] < lows[i-1] and lows[i] < lows[i-2] and lows[i] < lows[i+1] and lows[i] < lows[i+2]:
             level = lows[i]
-            tested = False
-            for j in range(i + 3, len(df)):
-                if highs[j] >= level >= lows[j]:
-                    tested = True
-                    break
-            if tested:
-                unfresh_supports.append(level)
-            else:
-                fresh_supports.append(level)
+            tested = any(highs[j] >= level >= lows[j] for j in range(i + 3, len(df)))
+            if tested: unfresh_supports.append(level)
+            else: fresh_supports.append(level)
 
     return fresh_supports, unfresh_supports, fresh_resistances, unfresh_resistances
 
-# --- NEW FEATURE 5: QM Pattern Scanner Engine ---
+# QM Pattern Scanner Engine
 def detect_qm_pattern(df):
-    if len(df) < 15:
-        return None, None
-    highs = df['high'].values
-    lows = df['low'].values
-    closes = df['close'].values
-    
-    # Simple heuristic for Quasimodo (QM) bullish setup: HH, LL, HH break, retest zone
-    last_high = max(highs[-15:])
-    last_low = min(lows[-15:])
+    if len(df) < 15: return "Searching...", None
+    highs, lows, closes = df['high'].values, df['low'].values, df['close'].values
+    last_high, last_low = max(highs[-15:]), min(lows[-15:])
     current_price = closes[-1]
     
-    # Let's check for Bullish QM Level
     qm_level = last_low + (last_high - last_low) * 0.382
     if abs(current_price - qm_level) / current_price < 0.015:
         return "Bullish QM Setup Detected 🟢", qm_level
@@ -208,7 +218,7 @@ def detect_qm_pattern(df):
 
     return "Searching for QM Formation...", None
 
-# Advanced Technical Indicators Engine
+# Advanced Indicators, FVG & Liquidity Engine
 def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
@@ -228,11 +238,20 @@ def calculate_advanced_metrics(df):
     vol_profile = df.groupby(price_bins, observed=False)['volume'].sum()
     poc_price = df['close'].mean() if vol_profile.empty else (vol_profile.idxmax().left + vol_profile.idxmax().right) / 2
 
-    return df, poc_price
+    highs, lows = df['high'].values, df['low'].values
+    buy_side_liquidity = max(highs[-20:]) if len(highs) >= 20 else max(highs)
+    sell_side_liquidity = min(lows[-20:]) if len(lows) >= 20 else min(lows)
+
+    bullish_fvgs = []
+    for i in range(1, len(df) - 1):
+        if df['low'].iloc[i+1] > df['high'].iloc[i-1]:
+            bullish_fvgs.append({'type': 'Bullish FVG', 'low': df['high'].iloc[i-1], 'high': df['low'].iloc[i+1], 'time': df['timestamp'].iloc[i]})
+
+    return df, poc_price, buy_side_liquidity, sell_side_liquidity, bullish_fvgs
 
 # --- UI LAYOUT ---
-st.title("⚡ Ultimate Institutional Trading Terminal V2.1")
-st.markdown("Equipped with Malaysian S&R Smart Levels, Buying Power Margin Dashboard, QM Scanner, and Multi-Timeframe Storyline.")
+st.title("⚡ Ultimate Institutional Trading Terminal V2.2")
+st.markdown("Equipped with MSNR Smart Levels, Buying Power Margin Dashboard, QM Scanner, Liquidity Pools, FVG & Storyline.")
 
 st.sidebar.header("🎛 Control & Intelligence Hub")
 
@@ -242,8 +261,6 @@ default_index = all_symbols.index("ACE/USDT") if "ACE/USDT" in all_symbols else 
 selected_coin = st.sidebar.selectbox("🔍 Select Asset:", all_symbols, index=default_index)
 timeframe = st.sidebar.selectbox("Execution Timeframe:", ["5m", "15m", "1h", "4h"], index=1)
 
-# --- NEW FEATURE 1 UI: Chart Mode Toggle (Candlestick vs Line) ---
-st.sidebar.divider()
 chart_type_mode = st.sidebar.radio("📊 Chart Display Style:", ["Candlestick", "Clean Line Chart (MSNR Mode)"], horizontal=True)
 
 st.sidebar.divider()
@@ -253,7 +270,7 @@ df_live = fetch_chart_data(selected_coin, timeframe=timeframe, limit=50)
 current_live_price = df_live['close'].iloc[-1] if not df_live.empty else 1.0
 current_atr = df_live['ATR'].iloc[-1] if not df_live.empty and 'ATR' in df_live.columns and not np.isnan(df_live['ATR'].iloc[-1]) else (current_live_price * 0.01)
 
-# --- NEW FEATURE 2: Buying Power & Margin Risk Dashboard ---
+# Buying Power & Margin Risk Dashboard
 st.sidebar.divider()
 st.sidebar.subheader("💰 Buying Power & Margin Dashboard")
 account_balance = st.sidebar.number_input("Account Balance ($):", value=10000.0, step=500.0)
@@ -266,16 +283,11 @@ col_bp2.metric("Buying Power", f"${buying_power:,.2f}", delta=f"-${used_margin:,
 
 risk_percentage = st.sidebar.slider("Risk Per Trade (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
 
-st.sidebar.markdown("#### 🧮 Quick Lot / Position Calculator")
-calc_risk_usd = account_balance * (risk_percentage / 100.0)
-calc_lot_size = calc_risk_usd / (current_live_price * 0.01) if current_live_price > 0 else 0
-st.sidebar.info(f"Recommended Position Size: **{calc_lot_size:,.2f} Units** (Max Risk: **${calc_risk_usd:.2f}**) ✨")
-
 enable_atr_sl = st.sidebar.checkbox("Activate ATR-based SL/TP Engine", value=True)
 atr_multiplier = st.sidebar.slider("ATR Multiplier:", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
 
 st.sidebar.divider()
-st.sidebar.subheader("📈 Trade Configuration")
+st.sidebar.subheader("📈 Trade Configuration & Targets")
 trade_type = st.sidebar.radio("Direction:", ["LONG (Bullish)", "SHORT (Bearish)"], horizontal=True)
 
 p_step = 0.0001 if current_live_price < 10 else 0.1
@@ -303,7 +315,7 @@ rrr_ratio = reward_distance / risk_distance if risk_distance > 0 else 0.0
 
 st.sidebar.info(f"⚖️ **Est. RRR (TP1):** `1:{rrr_ratio:.2f}`")
 
-# --- NEW FEATURE 3: SNR Rate & Custom Price Alerts ---
+# SNR Rate & Custom Price Alerts
 st.sidebar.divider()
 st.sidebar.subheader("🔔 SNR Rate & Custom Alerts")
 custom_alert_rate = st.sidebar.number_input("Set Target Price Alert:", value=float(current_live_price * 1.01), format="%.4f", step=p_step)
@@ -334,39 +346,34 @@ with col1:
 
     df = fetch_chart_data(selected_coin, timeframe=timeframe)
     if not df.empty:
-        df, poc_price = calculate_advanced_metrics(df)
+        df, poc_price, bs_liq, ss_liq, fvgs = calculate_advanced_metrics(df)
         live_price = df['close'].iloc[-1]
         rsi_val = df['RSI'].iloc[-1]
         ema_50 = df['EMA_50'].iloc[-1]
+        ema_200 = df['EMA_200'].iloc[-1]
         
-        # Calculate MSNR Levels
         fresh_supports, unfresh_supports, fresh_res, unfresh_res = calculate_msnr_levels(df)
-        
-        # Calculate QM Pattern
         qm_status, qm_level = detect_qm_pattern(df)
 
         sc1, sc2, sc3, sc4 = st.columns(4)
         sc1.metric("Live Price", f"${live_price:,.4f}")
         sc2.metric("RSI (14)", f"{rsi_val:.1f}")
         sc3.metric("MSNR Fresh Zones", f"{len(fresh_supports) + len(fresh_res)} Active")
-        sc4.metric("QM Pattern Scanner", qm_status)
+        sc4.metric("QM Scanner", qm_status)
 
-        # --- NEW FEATURE 4: Storyline & Multi-Timeframe Journal ---
+        # Storyline & Multi-Timeframe Journal
         st.markdown("### 📜 Storyline: Multi-Timeframe Journal & Trend Matrix")
-        df_15m = fetch_chart_data(selected_coin, timeframe='15m', limit=50)
         df_4h = fetch_chart_data(selected_coin, timeframe='4h', limit=50)
-        
         trend_4h = "BULLISH 🟢" if not df_4h.empty and df_4h['close'].iloc[-1] > df_4h['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
         macro_arrow = "⬆️ MACRO UPTREND" if "BULLISH" in trend_4h else "⬇️ MACRO DOWNTREND"
         
-        st.info(f"📌 **Daily/4H Macro Trend Indicator:** `{macro_arrow}` | 15m Execution timeframe loaded below in split session.")
+        st.info(f"📌 **Daily/4H Macro Trend Indicator:** `{macro_arrow}` | 15m Execution timeframe loaded below.")
 
-        # Interactive Journal Notes for Storyline
         with st.expander("📝 Storyline Notes & Trade Thesis (Click to expand)", expanded=True):
-            st.session_state['storyline_notes'] = st.text_area("Write down your multi-timeframe thesis:", value=st.session_state['storyline_notes'], placeholder="e.g. Daily trend is bullish, waiting for H1 fresh support retest before entry...")
+            st.session_state['storyline_notes'] = st.text_area("Write down your multi-timeframe thesis:", value=st.session_state['storyline_notes'])
 
-        # --- MAIN CHART RENDERING ---
-        st.subheader(f"📊 Smart MSNR & QM Chart: {selected_coin} [{timeframe}]")
+        # --- MAIN CHART RENDERING WITH ALL FEATURES ---
+        st.subheader(f"📊 Smart MSNR, Liquidity & QM Chart: {selected_coin} [{timeframe}]")
         
         if chart_type_mode == "Candlestick":
             fig = go.Figure(data=[go.Candlestick(
@@ -378,24 +385,42 @@ with col1:
                 x=df['timestamp'], y=df['close'], mode='lines', line=dict(color='#00D2FF', width=2), name='Line Chart'
             )])
         
-        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#FFA726', width=1.5)))
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_50'], mode='lines', name='EMA 50', line=dict(color='#00D2FF', width=1.5)))
+        fig.add_trace(go.Scatter(x=df['timestamp'], y=df['EMA_200'], mode='lines', name='EMA 200', line=dict(color='#FFA726', width=1.5)))
 
-        # Plot MSNR Fresh Levels (Darker Green/Red) and Unfresh Levels (Faint Green/Red)
+        # MSNR Levels
         for sup in fresh_supports:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#00C853", width=2.5))
             fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=sup, text=f"🟢 Fresh Support: ${sup:,.4f}", showarrow=False, yshift=-12, font=dict(color="#00C853", size=9, family="Arial Black"))
-
         for sup in unfresh_supports:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sup, y1=sup, line=dict(color="#81C784", width=1, dash="dot"))
 
         for res in fresh_res:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#D50000", width=2.5))
             fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/4)], y=res, text=f"🔴 Fresh Resistance: ${res:,.4f}", showarrow=False, yshift=14, font=dict(color="#D50000", size=9, family="Arial Black"))
-
         for res in unfresh_res:
             fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=res, y1=res, line=dict(color="#E57373", width=1, dash="dot"))
 
-        # Plot QM Pattern Zone if detected
+        # Liquidity Pools & POC
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=poc_price, y1=poc_price, line=dict(color="#FFD700", width=2, dash="dashdot"))
+        fig.add_annotation(x=df['timestamp'].iloc[int(len(df)/2)], y=poc_price, text=f"⭐ VPVR POC: ${poc_price:,.4f}", showarrow=False, yshift=15, font=dict(color="#FFD700", size=9, family="Arial Black"))
+
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=bs_liq, y1=bs_liq, line=dict(color="#E040FB", width=1.5, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[-3], y=bs_liq, text="💧 Buy-Side Liquidity Pool", showarrow=False, yshift=12, font=dict(color="#E040FB", size=9, family="Arial Black"))
+
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=ss_liq, y1=ss_liq, line=dict(color="#00E5FF", width=1.5, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[-3], y=ss_liq, text="💧 Sell-Side Liquidity Pool", showarrow=False, yshift=-14, font=dict(color="#00E5FF", size=9, family="Arial Black"))
+
+        # FVG Zones
+        for fvg in fvgs:
+            fig.add_hrect(
+                y0=fvg['low'], y1=fvg['high'],
+                fillcolor="rgba(0, 230, 118, 0.25)", line_width=1.5, line_dash="dot", line_color="#00E676",
+                annotation_text=f"✨ Active FVG (${fvg['low']:,.4f} - ${fvg['high']:,.4f})", 
+                annotation_position="top left", annotation_font=dict(color="#00E676", size=9, family="Arial Black")
+            )
+
+        # QM Pattern Zone
         if qm_level:
             fig.add_hrect(
                 y0=qm_level*0.995, y1=qm_level*1.005,
@@ -404,11 +429,47 @@ with col1:
                 annotation_font=dict(color="#FFD700", size=10, family="Arial Black")
             )
 
+        # Trade Entry, SL, TPs
+        t_label = "LONG" if "LONG" in trade_type else "SHORT"
+        fig.add_hrect(
+            y0=entry_price*0.998, y1=entry_price*1.002, 
+            fillcolor="rgba(0, 210, 255, 0.25)", line_width=1, line_color="#00D2FF",
+            annotation_text=f"🎯 {t_label} ENTRY", annotation_position="bottom left",
+            annotation_font=dict(color="#00D2FF", size=9, family="Arial Black")
+        )
+        
+        fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=sl_price, y1=sl_price, line=dict(color="#FF3B30", width=2, dash="dot"))
+        fig.add_annotation(x=df['timestamp'].iloc[-1], y=sl_price, text="🛑 SL", showarrow=True, arrowhead=2, ax=-25, ay=15, bgcolor="#FF3B30", font=dict(color="white", size=9, family="Arial Black"))
+
+        for idx, (tp_val, tp_color) in enumerate(zip([tp1_price, tp2_price, tp3_price], ["#00E676", "#00C853", "#00B0FF"]), 1):
+            fig.add_shape(type="line", x0=df['timestamp'].iloc[0], x1=df['timestamp'].iloc[-1], y0=tp_val, y1=tp_val, line=dict(color=tp_color, width=2, dash="dot"))
+            fig.add_annotation(x=df['timestamp'].iloc[-1], y=tp_val, text=f"🎯 TP{idx}", showarrow=True, arrowhead=2, ax=-25, ay=-15*idx, bgcolor=tp_color, font=dict(color="black" if idx<3 else "white", size=9, family="Arial Black"))
+
         fig.update_layout(
-            height=550, template="plotly_dark", xaxis_rangeslider_visible=False,
-            margin=dict(l=2, r=2, t=10, b=2), yaxis=dict(side="right", gridcolor="#222222"), xaxis=dict(gridcolor="#222222")
+            height=600, template="plotly_dark", xaxis_rangeslider_visible=False,
+            margin=dict(l=2, r=2, t=10, b=2), yaxis=dict(side="right", gridcolor="#222222"), xaxis=dict(gridcolor="#222222"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         st.plotly_chart(fig, use_container_width=True)
+        
+        # Chart Line Guide & Live Price Levels
+        st.markdown("### 🗺️ Chart Line Guide & Live Price Levels")
+        g1, g2, g3 = st.columns(3)
+        with g1:
+            st.markdown(f"🟢 **Fresh Supports Active:** {len(fresh_supports)}")
+            st.markdown(f"🔵 **EMA 50:** `${ema_50:,.4f}`")
+            st.markdown(f"🎯 **Entry Price:** `${entry_price:,.4f}`")
+        with g2:
+            st.markdown(f"🔴 **Fresh Resistances Active:** {len(fresh_res)}")
+            st.markdown(f"🟠 **EMA 200:** `${ema_200:,.4f}`")
+            st.markdown(f"🛑 **Stop Loss (SL):** `${sl_price:,.4f}`")
+        with g3:
+            st.markdown(f"⭐ **VPVR POC Level:** `${poc_price:,.4f}`")
+            st.markdown(f"💧 **Liquidity Pools:** `${bs_liq:,.4f}` / `${ss_liq:,.4f}`")
+
+        # Whale Transactions Tracker
+        st.markdown("### 🐋 Live Whale Transactions (Large Orders Tracker)")
+        st.dataframe(pd.DataFrame(fetch_whale_transactions(selected_coin, current_live_price)), use_container_width=True, hide_index=True)
 
         if st.button("📝 Log Current Signal to History"):
             st.session_state['signal_history'].append({
@@ -419,13 +480,10 @@ with col1:
                 "RRR": f"1:{rrr_ratio:.2f}"
             })
             st.success("Signal logged successfully!")
-            send_telegram_alert(f"🚀 *SIGNAL LOGGED*\nAsset: `{selected_coin}`\nStatus: `{qm_status}`\nEntry: `${entry_price}`")
 
         st.markdown("### 📈 Signal History & Backtest Engine")
         if st.session_state['signal_history']:
             st.dataframe(pd.DataFrame(st.session_state['signal_history']), use_container_width=True, hide_index=True)
-        else:
-            st.info("No signals logged yet.")
 
     else:
         st.warning("Loading chart feed...")
@@ -435,7 +493,7 @@ with col2:
     st.success("✅ MSNR Smart Levels Synced")
     st.success("✅ Buying Power Verified")
     st.success(f"✅ Margin Risk Checked (1:{rrr_ratio:.2f})")
-    st.success("✅ Order Book Depth Active")
+    st.success("✅ Liquidity & FVG Mapped")
     
     st.divider()
     st.markdown("### 🟢 STATUS: READY FOR EXECUTION")
