@@ -193,7 +193,7 @@ def detect_candle_patterns(df):
             
     return "Neutral / Normal"
 
-# 8. Telegram Alert Sender Function (Using st.secrets for safety)
+# 8. Telegram Alert Sender Function
 def send_telegram_alert(message):
     try:
         if "telegram" in st.secrets and "token" in st.secrets["telegram"] and "chat_id" in st.secrets["telegram"]:
@@ -207,12 +207,11 @@ def send_telegram_alert(message):
         pass
     return False
 
-# 9. ATR & Advanced Technical Indicators Engine (V2 Upgrade)
+# 9. ATR & Advanced Technical Indicators Engine
 def calculate_advanced_metrics(df):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
     
-    # ATR Calculation
     df['tr0'] = abs(df['high'] - df['low'])
     df['tr1'] = abs(df['high'] - df['close'].shift())
     df['tr2'] = abs(df['low'] - df['close'].shift())
@@ -224,7 +223,6 @@ def calculate_advanced_metrics(df):
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     df['RSI'] = 100 - (100 / (1 + (gain / loss)))
     
-    # Real Volume Profile POC & Clustered Liquidity Pools
     price_bins = pd.cut(df['close'], bins=20)
     vol_profile = df.groupby(price_bins, observed=False)['volume'].sum()
     if not vol_profile.empty:
@@ -251,7 +249,6 @@ def calculate_advanced_metrics(df):
     resistances = sorted(list(set(resistances)))[-2:]
     supports = sorted(list(set(supports)))[:2]
     
-    # True Order-Flow Clustered Liquidity Pools (Actual swing highs/lows accumulation)
     buy_side_liquidity = max(highs[-20:]) if len(highs) >= 20 else max(highs)
     sell_side_liquidity = min(lows[-20:]) if len(lows) >= 20 else min(lows)
 
@@ -301,7 +298,7 @@ def calculate_advanced_metrics(df):
             
     return df, supports, resistances, breakouts, selected_fvg, poc_price, buy_side_liquidity, sell_side_liquidity
 
-# 10. V2 Dynamic Signal Engine (LONG / SHORT / WAIT)
+# 10. V2 Dynamic Signal Engine
 def evaluate_signal_engine(live_price, ema_50, rsi_val, bid_p, ask_p, trend_4h, rrr_ratio):
     if live_price > ema_50 and bid_p > 50 and "BULLISH" in trend_4h and 35 <= rsi_val <= 65 and rrr_ratio >= 1.5:
         return "LONG 🟢", "High-Probability Bullish Setup Confirmed"
@@ -457,7 +454,6 @@ with col1:
         trend_1h = "BULLISH 🟢" if not df_1h.empty and df_1h['close'].iloc[-1] > df_1h['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
         trend_4h = "BULLISH 🟢" if not df_4h.empty and df_4h['close'].iloc[-1] > df_4h['close'].ewm(span=50).mean().iloc[-1] else "BEARISH 🔴"
         
-        # V2 Signal Engine Evaluation
         engine_status, engine_reason = evaluate_signal_engine(live_price, ema_50, rsi_val, bid_p, ask_p, trend_4h, rrr_ratio)
 
         sc1, sc2, sc3, sc4 = st.columns(4)
@@ -472,13 +468,11 @@ with col1:
         mtf_c2.metric("1h Trend (Structure)", trend_1h)
         mtf_c3.metric("4h Trend (Macro Direction)", trend_4h)
 
-        # --- WHALE TRANSACTIONS FEED SECTION ---
         st.markdown("### 🐋 Live Whale Transactions (Large Orders Tracker)")
         whale_data = fetch_whale_transactions(selected_coin, current_live_price, threshold_usd=5000)
         df_whale = pd.DataFrame(whale_data)
         st.dataframe(df_whale, use_container_width=True, hide_index=True)
 
-        # --- REAL ECONOMIC CALENDAR SECTION ---
         st.markdown("### 📰 High-Impact Economic Calendar & News Alerts")
         news_c1, news_c2, news_c3 = st.columns(3)
         news_c1.info("🇺🇸 **US Core CPI m/m**\n🕒 Today, 6:30 PM | 🔴 High Impact")
@@ -575,7 +569,6 @@ with col1:
             st.markdown(f"⭐ **VPVR POC Level:** `${poc_price:,.4f}`")
             st.markdown(f"💧 **Liquidity Pools:** `${bs_liq:,.4f}` / `${ss_liq:,.4f}`")
 
-        # Log Signal Button for Signal History Tracker
         if st.button("📝 Log Current Signal to History"):
             st.session_state['signal_history'].append({
                 "Time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -587,7 +580,6 @@ with col1:
             st.success("Signal logged successfully!")
             send_telegram_alert(f"🚀 *SIGNAL LOGGED*\nAsset: `{selected_coin}`\nVerdict: `{engine_status}`\nEntry: `${entry_price}`")
 
-        # --- SIGNAL HISTORY & BACKTEST PERFORMANCE STATS ---
         st.markdown("### 📈 Signal History & Backtest Engine Statistics")
         if st.session_state['signal_history']:
             df_history = pd.DataFrame(st.session_state['signal_history'])
@@ -601,7 +593,6 @@ with col1:
         else:
             st.info("No signals logged yet. Click 'Log Current Signal to History' to start tracking performance.")
 
-        # --- TRADE JOURNAL SECTION ---
         st.markdown("### 💾 Trade Journal")
         with st.form("trade_journal_form"):
             j_col1, j_col2, j_col3 = st.columns(3)
@@ -646,112 +637,3 @@ with col2:
         st.markdown("### 🟢 STATUS: ALL SYSTEMS GO")
     else:
         st.markdown("### 🔴 STATUS: STAND DOWN")
-        
-    st.divider()
-    st.markdown("🎯 **Trade Targets:**")
-    st.markdown(f"- **Entry:** `${entry_price:,.4f}`")
-    st.markdown(f"- **SL:** `${sl_price:,.4f}`")
-    st.markdown(f"- **TP1:** `${tp1_price:,.4f}`")
-    st.markdown(f"- **TP2:** `${tp2_price:,.4f}`")
-    st.markdown(f"- **TP3:** `${tp3_price:,.4f}`")
-Page Configuration
-st.set_page_config(page_title="Ultimate Institutional Trading Terminal V3", layout="wide")
-
-Session State for Journal
-if 'trade_journal' not in st.session_state:
-st.session_state['trade_journal'] = []
-
---- CORE LOGIC FUNCTIONS ---
-def fetch_chart_data(symbol, limit=150):
-dates = pd.date_range(start="2026-08-01", periods=limit, freq="H")
-df = pd.DataFrame({
-'timestamp': dates,
-'open': np.random.rand(limit) * 100,
-'high': np.random.rand(limit) * 105,
-'low': np.random.rand(limit) * 95,
-'close': np.random.rand(limit) * 100
-})
-return df
-
-def detect_msnr(df):
-res = df[(df['high'] > df['high'].shift(1)) & (df['high'] > df['high'].shift(-1))]
-sup = df[(df['low'] < df['low'].shift(1)) & (df['low'] < df['low'].shift(-1))]
-return res, sup
-
---- UI LAYOUT ---
-st.title("⚡ Ultimate Institutional Trading Terminal V3")
-
-Sidebar - Control Hub
-st.sidebar.header("🎛 Control Hub")
-selected_coin = st.sidebar.selectbox("Select Asset:", ["BTC/USDT", "ETH/USDT", "ACE/USDT"])
-enable_msnr = st.sidebar.checkbox("✅ Enable Smart MSNR (Levels)")
-enable_qm = st.sidebar.checkbox("⭐ Enable QM Pattern Scanner (VIP)")
-
-Main Dashboard
-col1, col2 = st.columns([3, 1])
-
-with col1:
-# 1. Storyline - Multi-Timeframe Journal
-st.subheader("🌐 Storyline (Multi-Timeframe)")
-mtf_cols = st.columns(3)
-mtf_cols[0].metric("Daily Trend", "UP 🟢")
-mtf_cols[1].metric("H1 Trend", "NEUTRAL 🟡")
-mtf_cols[2].metric("15m Trend", "DOWN 🔴")
-
-# 2. Main Chart
-df = fetch_chart_data(selected_coin)
-fig = go.Figure(data=[go.Candlestick(
-x=df['timestamp'],
-open=df['open'],
-high=df['high'],
-low=df['low'],
-close=df['close']
-)])
-
-if enable_msnr:
-res, sup = detect_msnr(df)
-for _, r in res.iterrows():
-fig.add_shape(
-type="line",
-x0=r['timestamp'],
-x1=r['timestamp'],
-y0=r['high'],
-y1=r['high'] + 2,
-line=dict(color="red", width=2)
-)
-
-if enable_qm:
-fig.add_annotation(
-x=df['timestamp'].iloc[-10],
-y=df['close'].iloc[-10],
-text="🔍 QM Zone",
-bgcolor="yellow",
-font=dict(color="black")
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-# 4. Trading Notes (Journal)
-st.text_area("✍️ Trading Journal / Notes:", placeholder="Daily trend is up, waiting for H1 support...")
-
-with col2:
-# 2. Buying Power (Margin Dashboard)
-st.subheader("💳 Margin & Risk")
-balance = 10000.0
-st.metric("Total Balance", f" {(balance * 0.7):,.2f}")
-
-# Risk Calculator
-st.subheader("🧮 Risk Calculator")
-entry = st.number_input("Entry Price:", value=0.0)
-sl = st.number_input("Stop Loss:", value=0.0)
-if entry > 0 and sl > 0:
-st.info(f"Risk per Trade: $`{abs(entry - sl):,.2f}")
-
-# 3. SNR Rate Alerts
-st.divider()
-st.subheader("🔔 SNR Alerts")
-alert_price = st.number_input("Set Price Alert:", value=50000.0)
-if st.button("Activate SNR Alert"):
-st.success(f"Notification set for `${alert_price:,.2f}!")
-
-st.success("Terminal V3 Ready! QM Pattern Scanner and Smart MSNR active.")
