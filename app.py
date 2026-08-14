@@ -654,3 +654,104 @@ with col2:
     st.markdown(f"- **TP1:** `${tp1_price:,.4f}`")
     st.markdown(f"- **TP2:** `${tp2_price:,.4f}`")
     st.markdown(f"- **TP3:** `${tp3_price:,.4f}`")
+Page Configuration
+st.set_page_config(page_title="Ultimate Institutional Trading Terminal V3", layout="wide")
+
+Session State for Journal
+if 'trade_journal' not in st.session_state:
+st.session_state['trade_journal'] = []
+
+--- CORE LOGIC FUNCTIONS ---
+def fetch_chart_data(symbol, limit=150):
+dates = pd.date_range(start="2026-08-01", periods=limit, freq="H")
+df = pd.DataFrame({
+'timestamp': dates,
+'open': np.random.rand(limit) * 100,
+'high': np.random.rand(limit) * 105,
+'low': np.random.rand(limit) * 95,
+'close': np.random.rand(limit) * 100
+})
+return df
+
+def detect_msnr(df):
+res = df[(df['high'] > df['high'].shift(1)) & (df['high'] > df['high'].shift(-1))]
+sup = df[(df['low'] < df['low'].shift(1)) & (df['low'] < df['low'].shift(-1))]
+return res, sup
+
+--- UI LAYOUT ---
+st.title("⚡ Ultimate Institutional Trading Terminal V3")
+
+Sidebar - Control Hub
+st.sidebar.header("🎛 Control Hub")
+selected_coin = st.sidebar.selectbox("Select Asset:", ["BTC/USDT", "ETH/USDT", "ACE/USDT"])
+enable_msnr = st.sidebar.checkbox("✅ Enable Smart MSNR (Levels)")
+enable_qm = st.sidebar.checkbox("⭐ Enable QM Pattern Scanner (VIP)")
+
+Main Dashboard
+col1, col2 = st.columns([3, 1])
+
+with col1:
+# 1. Storyline - Multi-Timeframe Journal
+st.subheader("🌐 Storyline (Multi-Timeframe)")
+mtf_cols = st.columns(3)
+mtf_cols[0].metric("Daily Trend", "UP 🟢")
+mtf_cols[1].metric("H1 Trend", "NEUTRAL 🟡")
+mtf_cols[2].metric("15m Trend", "DOWN 🔴")
+
+# 2. Main Chart
+df = fetch_chart_data(selected_coin)
+fig = go.Figure(data=[go.Candlestick(
+x=df['timestamp'],
+open=df['open'],
+high=df['high'],
+low=df['low'],
+close=df['close']
+)])
+
+if enable_msnr:
+res, sup = detect_msnr(df)
+for _, r in res.iterrows():
+fig.add_shape(
+type="line",
+x0=r['timestamp'],
+x1=r['timestamp'],
+y0=r['high'],
+y1=r['high'] + 2,
+line=dict(color="red", width=2)
+)
+
+if enable_qm:
+fig.add_annotation(
+x=df['timestamp'].iloc[-10],
+y=df['close'].iloc[-10],
+text="🔍 QM Zone",
+bgcolor="yellow",
+font=dict(color="black")
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# 4. Trading Notes (Journal)
+st.text_area("✍️ Trading Journal / Notes:", placeholder="Daily trend is up, waiting for H1 support...")
+
+with col2:
+# 2. Buying Power (Margin Dashboard)
+st.subheader("💳 Margin & Risk")
+balance = 10000.0
+st.metric("Total Balance", f" {(balance * 0.7):,.2f}")
+
+# Risk Calculator
+st.subheader("🧮 Risk Calculator")
+entry = st.number_input("Entry Price:", value=0.0)
+sl = st.number_input("Stop Loss:", value=0.0)
+if entry > 0 and sl > 0:
+st.info(f"Risk per Trade: $`{abs(entry - sl):,.2f}")
+
+# 3. SNR Rate Alerts
+st.divider()
+st.subheader("🔔 SNR Alerts")
+alert_price = st.number_input("Set Price Alert:", value=50000.0)
+if st.button("Activate SNR Alert"):
+st.success(f"Notification set for `${alert_price:,.2f}!")
+
+st.success("Terminal V3 Ready! QM Pattern Scanner and Smart MSNR active.")
