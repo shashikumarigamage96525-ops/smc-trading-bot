@@ -125,7 +125,6 @@ def fetch_order_book_metrics(symbol):
 
 @st.cache_data(ttl=5)
 def fetch_derivatives_data(symbol):
-    # Simulated/Live fallback metrics for OI and Funding Rate
     return {
         "Funding Rate": "+0.0100%",
         "Open Interest Change": "+4.25%",
@@ -209,7 +208,6 @@ def calculate_v3_institutional_engine(df, df_4h, bid_p, ask_p, rrr_ratio):
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
     df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
     
-    # ATR Calculation
     df['tr0'] = abs(df['high'] - df['low'])
     df['tr1'] = abs(df['high'] - df['close'].shift())
     df['tr2'] = abs(df['low'] - df['close'].shift())
@@ -221,39 +219,26 @@ def calculate_v3_institutional_engine(df, df_4h, bid_p, ask_p, rrr_ratio):
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     df['RSI'] = 100 - (100 / (1 + (gain / loss)))
 
-    # Component Breakdowns for V3 Score (Total 100)
     score_breakdown = {}
     
-    # 1. HTF Bias (Max 20)
-    htf_bullish = not df_4h.empty and df_4h['close'].iloc[-1] > df_4h['close'].ewm(span=50).mean().iloc[-1]
+    htf_bullish = not df_4h.empty and df_4h['close'].iloc[-1] > df_4h['close'].ewm(span=50, adjust=False).mean().iloc[-1]
     score_breakdown['HTF Trend'] = 20 if htf_bullish else 5
 
-    # 2. Market Structure (Max 20) - BOS / CHoCH proxy via recent swings
     recent_trend = df['close'].iloc[-1] > df['EMA_50'].iloc[-1]
     score_breakdown['Market Structure'] = 20 if recent_trend else 8
 
-    # 3. Liquidity Sweep (Max 15)
-    score_breakdown['Liquidity Sweep'] = 15 # Scored based on proximity to high/low pools
-
-    # 4. FVG / OB Confluence (Max 15)
+    score_breakdown['Liquidity Sweep'] = 15
     score_breakdown['FVG/OB'] = 15
 
-    # 5. Volume Engine (Max 10)
     vol_spike = df['volume'].iloc[-1] > df['volume'].rolling(20).mean().iloc[-1] * 1.5
     score_breakdown['Volume'] = 10 if vol_spike else 5
 
-    # 6. Order Book Engine (Max 5)
     score_breakdown['Order Book'] = 5 if bid_p > 55 or ask_p > 55 else 2
-
-    # 7. OI / Funding Derivatives (Max 5)
     score_breakdown['OI/Funding'] = 5
-
-    # 8. Risk/Reward Ratio (Max 10)
     score_breakdown['Risk/Reward'] = 10 if rrr_ratio >= 2.0 else (5 if rrr_ratio >= 1.5 else 0)
 
     total_score = sum(score_breakdown.values())
 
-    # Grading
     if total_score >= 80:
         grade = "A+ Setup 🟢"
         verdict = "LONG" if htf_bullish else "SHORT"
@@ -267,7 +252,6 @@ def calculate_v3_institutional_engine(df, df_4h, bid_p, ask_p, rrr_ratio):
         grade = "WAIT ⏳"
         verdict = "WAIT"
 
-    # Supports / Resistances & FVG extraction
     highs = df['high'].values
     lows = df['low'].values
     supports = []
@@ -291,14 +275,13 @@ def run_strategy_backtester(df, strategy_name, sl_mult=2.0, tp_mult=3.0):
     
     for i in range(50, len(df) - 5):
         entry_p = df['close'].iloc[i]
-        atr_val = df['ATR'].iloc[i] if not np.isnan(df['ATR'].iloc[i]) else entry_p * 0.01
-        ema50 = df['EMA_50'].iloc[i]
+        atr_val = df['ATR'].iloc[i] if 'ATR' in df.columns and not np.isnan(df['ATR'].iloc[i]) else entry_p * 0.01
+        ema50 = df['EMA_50'].iloc[i] if 'EMA_50' in df.columns else entry_p
         
         is_long = entry_p > ema50
         sl = entry_p - (sl_mult * atr_val) if is_long else entry_p + (sl_mult * atr_val)
         tp = entry_p + (tp_mult * atr_val) if is_long else entry_p - (tp_mult * atr_val)
         
-        # Simulate outcome across subsequent candles
         outcome = "LOSS"
         exit_price = sl
         for j in range(i+1, min(i+15, len(df))):
@@ -338,7 +321,7 @@ def run_strategy_backtester(df, strategy_name, sl_mult=2.0, tp_mult=3.0):
         
     df_trades = pd.DataFrame(trades)
     if df_trades.empty:
-        return 0, 0, 0, 0, 0, []
+        return 0, 0, 0, 0, pd.DataFrame(), []
         
     wins = len(df_trades[df_trades['Outcome'] == "WIN"])
     total_t = len(df_trades)
@@ -367,9 +350,8 @@ timeframe = st.sidebar.selectbox("Execution Timeframe:", ["5m", "15m", "1h", "4h
 st.sidebar.divider()
 selected_strategy_name = st.sidebar.selectbox("Select Strategy:", list(STRATEGIES.keys()))
 
-df_live = fetch_chart_data(selected_coin, timeframe=timeframe, limit=100)
+df_live = fetch_chart_data(selected_coin, timeframe=timeframe, limit=200)
 current_live_price = df_live['close'].iloc[-1] if not df_live.empty else 1.0
-current_atr = df_live['ATR'].iloc[-1] if not df_live.empty and 'ATR' in df_live.columns and not np.isnan(df_live['ATR'].iloc[-1]) else (current_live_price * 0.01)
 
 st.sidebar.divider()
 st.sidebar.subheader("💰 Risk & Position Management")
@@ -377,23 +359,36 @@ account_balance = st.sidebar.number_input("Account Balance ($):", value=10000.0,
 risk_percentage = st.sidebar.slider("Risk Per Trade (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
 atr_multiplier = st.sidebar.slider("ATR Multiplier for SL:", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
 
-# --- FETCH DATA & RUN V3 ENGINE ---
+# --- FETCH DATA & RUN V3 ENGINE WITH SAFE CHECKS ---
 df_4h = fetch_chart_data(selected_coin, timeframe='4h', limit=50)
 bid_p, ask_p = fetch_order_book_metrics(selected_coin)
 derivatives = fetch_derivatives_data(selected_coin)
 
 if not df_live.empty:
+    # Safe ATR & Indicators calculation
+    if 'ATR' not in df_live.columns:
+        df_live['EMA_50'] = df_live['close'].ewm(span=50, adjust=False).mean()
+        df_live['tr0'] = abs(df_live['high'] - df_live['low'])
+        df_live['tr1'] = abs(df_live['high'] - df_live['close'].shift())
+        df_live['tr2'] = abs(df_live['low'] - df_live['close'].shift())
+        df_live['TR'] = df_live[['tr0', 'tr1', 'tr2']].max(axis=1)
+        df_live['ATR'] = df_live['TR'].rolling(window=14).mean()
+
+    current_atr = df_live['ATR'].iloc[-1] if not np.isnan(df_live['ATR'].iloc[-1]) else (current_live_price * 0.01)
+    
     entry_price = current_live_price
-    sl_price = entry_price - (atr_multiplier * current_atr) if entry_price > df_live['EMA_50'].iloc[-1] else entry_price + (atr_multiplier * current_atr)
-    tp1_price = entry_price + (atr_multiplier * 1.5 * current_atr) if entry_price > df_live['EMA_50'].iloc[-1] else entry_price - (atr_multiplier * 1.5 * current_atr)
+    ema_50_val = df_live['EMA_50'].iloc[-1] if 'EMA_50' in df_live.columns else entry_price
+    
+    sl_price = entry_price - (atr_multiplier * current_atr) if entry_price > ema_50_val else entry_price + (atr_multiplier * current_atr)
+    tp1_price = entry_price + (atr_multiplier * 1.5 * current_atr) if entry_price > ema_50_val else entry_price - (atr_multiplier * 1.5 * current_atr)
     
     risk_dist = abs(entry_price - sl_price)
     reward_dist = abs(tp1_price - entry_price)
     rrr_ratio = reward_dist / risk_dist if risk_dist > 0 else 0
 
     df, supports, resistances, bs_liq, ss_liq, total_score, grade, verdict, breakdown = calculate_v3_institutional_engine(df_live, df_4h, bid_p, ask_p, rrr_ratio)
-    rsi_val = df['RSI'].iloc[-1]
-    ema_50 = df['EMA_50'].iloc[-1]
+    rsi_val = df['RSI'].iloc[-1] if 'RSI' in df.columns else 50.0
+    ema_50 = df['EMA_50'].iloc[-1] if 'EMA_50' in df.columns else current_live_price
     candle_pattern = detect_candle_patterns(df)
 
     # --- MAIN DASHBOARD AREA ---
@@ -457,6 +452,14 @@ if not df_live.empty:
         if st.button("🚀 Run Backtest Calculation"):
             df_hist = fetch_chart_data(selected_coin, timeframe=bt_timeframe, limit=bt_candles_limit)
             if not df_hist.empty:
+                # Calculate indicators for backtest dataset
+                df_hist['EMA_50'] = df_hist['close'].ewm(span=50, adjust=False).mean()
+                df_hist['tr0'] = abs(df_hist['high'] - df_hist['low'])
+                df_hist['tr1'] = abs(df_hist['high'] - df_hist['close'].shift())
+                df_hist['tr2'] = abs(df_hist['low'] - df_hist['close'].shift())
+                df_hist['TR'] = df_hist[['tr0', 'tr1', 'tr2']].max(axis=1)
+                df_hist['ATR'] = df_hist['TR'].rolling(window=14).mean()
+
                 wr, pf, mdd, total_trades, trades_df, eq_curve = run_strategy_backtester(df_hist, selected_strategy_name, sl_mult=atr_multiplier)
                 
                 res_c1, res_c2, res_c3, res_c4 = st.columns(4)
