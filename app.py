@@ -8,8 +8,8 @@ from datetime import datetime
 import time
 
 # ============================================================
-# ⚡ ULTIMATE INSTITUTIONAL TRADING TERMINAL V3
-# Real Data + MTF + Liquidity + FVG + BOS/MSS + Backtest
+# ⚡ ULTIMATE INSTITUTIONAL TRADING TERMINAL V3 (FULL FEATURED)
+# Real Data + MTF + Liquidity + FVG + BOS/MSS + Backtest + Chart Visuals
 # ============================================================
 
 st.set_page_config(
@@ -79,7 +79,6 @@ def api_get(url, params=None, timeout=5):
 
 def format_price(price):
     price = safe_float(price)
-
     if price >= 1000:
         return f"{price:,.2f}"
     elif price >= 1:
@@ -96,11 +95,7 @@ def format_price(price):
 
 @st.cache_data(ttl=3600)
 def fetch_available_coins():
-    data = api_get(
-        f"{BINANCE_API}/api/v3/exchangeInfo",
-        timeout=5
-    )
-
+    data = api_get(f"{BINANCE_API}/api/v3/exchangeInfo", timeout=5)
     if data:
         symbols = []
         for s in data.get("symbols", []):
@@ -109,9 +104,7 @@ def fetch_available_coins():
                 and s.get("status") == "TRADING"
                 and s.get("isSpotTradingAllowed", True)
             ):
-                symbols.append(
-                    s["symbol"][:-4] + "/USDT"
-                )
+                symbols.append(s["symbol"][:-4] + "/USDT")
         if symbols:
             return sorted(set(symbols))
 
@@ -130,16 +123,10 @@ def fetch_available_coins():
 
 @st.cache_data(ttl=5)
 def fetch_watchlist_tickers(symbols):
-    data = api_get(
-        f"{BINANCE_API}/api/v3/ticker/24hr",
-        timeout=5
-    )
+    data = api_get(f"{BINANCE_API}/api/v3/ticker/24hr", timeout=5)
     output = []
     if data:
-        lookup = {
-            x["symbol"]: x
-            for x in data
-        }
+        lookup = {x["symbol"]: x for x in data}
         for symbol in symbols:
             clean = symbol.replace("/", "")
             if clean in lookup:
@@ -166,18 +153,9 @@ def fetch_chart_data(symbol, timeframe="15m", limit=500):
         "limit": limit
     }
 
-    data = api_get(
-        f"{BINANCE_API}/api/v3/klines",
-        params=params,
-        timeout=8
-    )
-
+    data = api_get(f"{BINANCE_API}/api/v3/klines", params=params, timeout=8)
     if not isinstance(data, list):
-        data = api_get(
-            f"{BINANCE_VISION}/api/v3/klines",
-            params=params,
-            timeout=8
-        )
+        data = api_get(f"{BINANCE_VISION}/api/v3/klines", params=params, timeout=8)
 
     if not isinstance(data, list):
         return pd.DataFrame()
@@ -192,24 +170,16 @@ def fetch_chart_data(symbol, timeframe="15m", limit=500):
             ]
         )
 
-        df["timestamp"] = pd.to_datetime(
-            df["timestamp"],
-            unit="ms"
-        )
-
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         numeric_cols = [
             "open", "high", "low", "close", "volume",
             "quote_volume", "trades", "taker_buy_base", "taker_buy_quote"
         ]
 
         for c in numeric_cols:
-            df[c] = pd.to_numeric(
-                df[c],
-                errors="coerce"
-            )
+            df[c] = pd.to_numeric(df[c], errors="coerce")
 
         return df.reset_index(drop=True)
-
     except:
         return pd.DataFrame()
 
@@ -223,12 +193,10 @@ def add_indicators(df):
     if df.empty:
         return df
 
-    # EMA
     df["EMA20"] = df["close"].ewm(span=20, adjust=False).mean()
     df["EMA50"] = df["close"].ewm(span=50, adjust=False).mean()
     df["EMA200"] = df["close"].ewm(span=200, adjust=False).mean()
 
-    # ATR
     prev_close = df["close"].shift(1)
     tr1 = df["high"] - df["low"]
     tr2 = abs(df["high"] - prev_close)
@@ -237,7 +205,6 @@ def add_indicators(df):
     df["TR"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     df["ATR"] = df["TR"].rolling(14).mean()
 
-    # RSI
     delta = df["close"].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -247,12 +214,10 @@ def add_indicators(df):
     df["RSI"] = 100 - (100 / (1 + rs))
     df["RSI"] = df["RSI"].fillna(50)
 
-    # Relative Volume
     df["VOL_MA20"] = df["volume"].rolling(20).mean()
     df["RVOL"] = (df["volume"] / df["VOL_MA20"].replace(0, np.nan))
     df["RVOL"] = df["RVOL"].replace([np.inf, -np.inf], np.nan).fillna(1)
 
-    # Buy volume
     df["BUY_VOLUME"] = df["taker_buy_base"]
     df["SELL_VOLUME"] = df["volume"] - df["taker_buy_base"]
     df["BUY_SELL_RATIO"] = (df["BUY_VOLUME"] / df["SELL_VOLUME"].replace(0, np.nan))
@@ -291,12 +256,7 @@ def detect_structure(df, lookback=3):
 # ============================================================
 
 def detect_bos_mss(df):
-    result = {
-        "event": "NONE",
-        "direction": "NEUTRAL",
-        "level": None
-    }
-
+    result = {"event": "NONE", "direction": "NEUTRAL", "level": None}
     if len(df) < 20:
         return result
 
@@ -307,22 +267,13 @@ def detect_bos_mss(df):
     if not swing_highs.empty:
         last_high = swing_highs["high"].iloc[-1]
         if current_close > last_high:
-            result = {
-                "event": "BULLISH BOS",
-                "direction": "BULLISH",
-                "level": last_high
-            }
+            result = {"event": "BULLISH BOS", "direction": "BULLISH", "level": last_high}
 
     if not swing_lows.empty:
         last_low = swing_lows["low"].iloc[-1]
         if current_close < last_low:
-            result = {
-                "event": "BEARISH BOS",
-                "direction": "BEARISH",
-                "level": last_low
-            }
+            result = {"event": "BEARISH BOS", "direction": "BEARISH", "level": last_low}
 
-    # MSS approximation
     recent = df.tail(10)
     if len(recent) >= 5:
         old_close = recent["close"].iloc[0]
@@ -339,11 +290,7 @@ def detect_bos_mss(df):
 # ============================================================
 
 def detect_liquidity_sweep(df):
-    result = {
-        "type": "NONE",
-        "level": None
-    }
-
+    result = {"type": "NONE", "level": None}
     if len(df) < 20:
         return result
 
@@ -352,16 +299,10 @@ def detect_liquidity_sweep(df):
     previous_low = df["low"].iloc[-12:-2].min()
 
     if recent["high"] > previous_high and recent["close"] < previous_high:
-        return {
-            "type": "BUY-SIDE LIQUIDITY SWEEP",
-            "level": previous_high
-        }
+        return {"type": "BUY-SIDE LIQUIDITY SWEEP", "level": previous_high}
 
     if recent["low"] < previous_low and recent["close"] > previous_low:
-        return {
-            "type": "SELL-SIDE LIQUIDITY SWEEP",
-            "level": previous_low
-        }
+        return {"type": "SELL-SIDE LIQUIDITY SWEEP", "level": previous_low}
 
     return result
 
@@ -371,9 +312,7 @@ def detect_liquidity_sweep(df):
 # ============================================================
 
 def detect_fvgs(df):
-    bullish = []
-    bearish = []
-
+    bullish, bearish = [], []
     if len(df) < 3:
         return bullish, bearish
 
@@ -408,9 +347,7 @@ def detect_fvgs(df):
 # ============================================================
 
 def detect_order_blocks(df):
-    bullish_ob = []
-    bearish_ob = []
-
+    bullish_ob, bearish_ob = [], []
     if len(df) < 10:
         return bullish_ob, bearish_ob
 
@@ -445,13 +382,10 @@ def calculate_poc(df, bins=30):
     try:
         if df.empty:
             return 0
-
         price_bins = pd.cut(df["close"], bins=bins)
         profile = df.groupby(price_bins, observed=False)["volume"].sum()
-
         if profile.empty:
             return float(df["close"].iloc[-1])
-
         poc_bin = profile.idxmax()
         return (poc_bin.left + poc_bin.right) / 2
     except:
@@ -471,13 +405,7 @@ def fetch_order_book(symbol):
     )
 
     if not data:
-        return {
-            "bid_pressure": 50,
-            "ask_pressure": 50,
-            "imbalance": 0,
-            "best_bid": 0,
-            "best_ask": 0
-        }
+        return {"bid_pressure": 50, "ask_pressure": 50, "imbalance": 0, "best_bid": 0, "best_ask": 0}
 
     try:
         bids = np.array([[float(x[0]), float(x[1])] for x in data.get("bids", [])])
@@ -489,9 +417,7 @@ def fetch_order_book(symbol):
         mid = (bids[0, 0] + asks[0, 0]) / 2
         distances = [0.001, 0.0025, 0.005, 0.01]
 
-        weighted_bid = 0
-        weighted_ask = 0
-
+        weighted_bid, weighted_ask = 0, 0
         for distance in distances:
             bid_mask = bids[:, 0] >= mid * (1 - distance)
             ask_mask = asks[:, 0] <= mid * (1 + distance)
@@ -501,10 +427,8 @@ def fetch_order_book(symbol):
             weighted_ask += asks[ask_mask, 1].sum() * weight
 
         total = weighted_bid + weighted_ask
-
         if total <= 0:
-            bid_pressure = 50
-            ask_pressure = 50
+            bid_pressure, ask_pressure = 50, 50
         else:
             bid_pressure = (weighted_bid / total) * 100
             ask_pressure = (weighted_ask / total) * 100
@@ -517,13 +441,7 @@ def fetch_order_book(symbol):
             "best_ask": asks[0, 0]
         }
     except:
-        return {
-            "bid_pressure": 50,
-            "ask_pressure": 50,
-            "imbalance": 0,
-            "best_bid": 0,
-            "best_ask": 0
-        }
+        return {"bid_pressure": 50, "ask_pressure": 50, "imbalance": 0, "best_bid": 0, "best_ask": 0}
 
 
 # ============================================================
@@ -543,7 +461,6 @@ def get_trend(df):
         return "BULLISH"
     if price < ema50 and ema50 < ema200:
         return "BEARISH"
-
     return "NEUTRAL"
 
 
@@ -565,97 +482,66 @@ def calculate_signal_score(
     rsi = latest["RSI"]
     rvol = latest["RVOL"]
 
-    long_score = 0
-    short_score = 0
-    long_reasons = []
-    short_reasons = []
+    long_score, short_score = 0, 0
+    long_reasons, short_reasons = [], []
 
-    # HTF TREND
     if trend_4h == "BULLISH":
-        long_score += 20
-        long_reasons.append("4H bullish")
+        long_score += 20; long_reasons.append("4H bullish")
     elif trend_4h == "BEARISH":
-        short_score += 20
-        short_reasons.append("4H bearish")
+        short_score += 20; short_reasons.append("4H bearish")
 
     if trend_1h == "BULLISH":
-        long_score += 10
-        long_reasons.append("1H bullish")
+        long_score += 10; long_reasons.append("1H bullish")
     elif trend_1h == "BEARISH":
-        short_score += 10
-        short_reasons.append("1H bearish")
+        short_score += 10; short_reasons.append("1H bearish")
 
     if trend_15m == "BULLISH":
         long_score += 10
     elif trend_15m == "BEARISH":
         short_score += 10
 
-    # EMA
     if price > ema50 > ema200:
-        long_score += 10
-        long_reasons.append("EMA bullish structure")
+        long_score += 10; long_reasons.append("EMA bullish structure")
     elif price < ema50 < ema200:
-        short_score += 10
-        short_reasons.append("EMA bearish structure")
+        short_score += 10; short_reasons.append("EMA bearish structure")
 
-    # RSI
     if 45 <= rsi <= 65 and price > ema50:
-        long_score += 8
-        long_reasons.append("RSI bullish zone")
+        long_score += 8; long_reasons.append("RSI bullish zone")
     if 35 <= rsi <= 55 and price < ema50:
-        short_score += 8
-        short_reasons.append("RSI bearish zone")
+        short_score += 8; short_reasons.append("RSI bearish zone")
 
-    # VOLUME
     if rvol >= 1.3:
         if price > latest["open"]:
-            long_score += 8
-            long_reasons.append("Volume expansion")
+            long_score += 8; long_reasons.append("Volume expansion")
         elif price < latest["open"]:
-            short_score += 8
-            short_reasons.append("Volume expansion")
+            short_score += 8; short_reasons.append("Volume expansion")
 
-    # ORDER BOOK
     if orderbook["bid_pressure"] >= 55:
-        long_score += 7
-        long_reasons.append("Bid pressure")
+        long_score += 7; long_reasons.append("Bid pressure")
     if orderbook["ask_pressure"] >= 55:
-        short_score += 7
-        short_reasons.append("Ask pressure")
+        short_score += 7; short_reasons.append("Ask pressure")
 
-    # STRUCTURE
     if structure["direction"] == "BULLISH":
-        long_score += 12
-        long_reasons.append(structure["event"])
+        long_score += 12; long_reasons.append(structure["event"])
     elif structure["direction"] == "BEARISH":
-        short_score += 12
-        short_reasons.append(structure["event"])
+        short_score += 12; short_reasons.append(structure["event"])
 
-    # LIQUIDITY SWEEP
     if sweep["type"] == "SELL-SIDE LIQUIDITY SWEEP":
-        long_score += 10
-        long_reasons.append("Sell-side liquidity sweep")
+        long_score += 10; long_reasons.append("Sell-side liquidity sweep")
     elif sweep["type"] == "BUY-SIDE LIQUIDITY SWEEP":
-        short_score += 10
-        short_reasons.append("Buy-side liquidity sweep")
+        short_score += 10; short_reasons.append("Buy-side liquidity sweep")
 
-    # FVG
     if fvgs:
         last_fvg = fvgs[-1]
         if last_fvg["type"] == "Bullish FVG":
-            long_score += 5
-            long_reasons.append("Bullish FVG")
+            long_score += 5; long_reasons.append("Bullish FVG")
         elif last_fvg["type"] == "Bearish FVG":
-            short_score += 5
-            short_reasons.append("Bearish FVG")
+            short_score += 5; short_reasons.append("Bearish FVG")
 
-    # ORDER BLOCK
     if bullish_obs:
-        long_score += 5
-        long_reasons.append("Bullish OB")
+        long_score += 5; long_reasons.append("Bullish OB")
     if bearish_obs:
-        short_score += 5
-        short_reasons.append("Bearish OB")
+        short_score += 5; short_reasons.append("Bearish OB")
 
     if long_score >= 70 and long_score > short_score:
         return {"score": min(long_score, 100), "direction": "LONG", "reasons": long_reasons}
@@ -664,7 +550,6 @@ def calculate_signal_score(
 
     if long_score > short_score:
         return {"score": long_score, "direction": "WAIT", "reasons": long_reasons}
-
     return {"score": short_score, "direction": "WAIT", "reasons": short_reasons}
 
 
@@ -693,204 +578,7 @@ def calculate_trade_levels(entry, atr, direction, atr_multiplier):
 
 
 # ============================================================
-# REALISTIC BACKTEST
-# ============================================================
-
-def run_backtest(df, direction_mode="AUTO", risk_reward=1.5, ema_period=50):
-    if df.empty or len(df) < 100:
-        return {
-            "trades": [], "win_rate": 0, "profit_factor": 0,
-            "max_drawdown": 0, "net_r": 0, "equity": []
-        }
-
-    data = add_indicators(df.copy())
-    trades = []
-    equity = [0]
-    current_r = 0
-
-    for i in range(60, len(data) - 2):
-        row = data.iloc[i]
-        price = row["close"]
-        ema = row["EMA50"]
-        rsi = row["RSI"]
-        rvol = row["RVOL"]
-
-        direction = None
-        if price > ema and 45 <= rsi <= 65 and rvol >= 1:
-            direction = "LONG"
-        elif price < ema and 35 <= rsi <= 55 and rvol >= 1:
-            direction = "SHORT"
-
-        if direction_mode != "AUTO":
-            direction = direction_mode
-
-        if direction is None:
-            continue
-
-        entry = price
-        atr = row["ATR"]
-        if pd.isna(atr) or atr <= 0:
-            continue
-
-        risk = atr * 1.5
-
-        if direction == "LONG":
-            sl = entry - risk
-            tp = entry + risk * risk_reward
-            future = data.iloc[i + 1:min(i + 21, len(data))]
-            outcome = None
-            for _, candle in future.iterrows():
-                if candle["low"] <= sl:
-                    outcome = -1
-                    break
-                if candle["high"] >= tp:
-                    outcome = risk_reward
-                    break
-        else:
-            sl = entry + risk
-            tp = entry - risk * risk_reward
-            future = data.iloc[i + 1:min(i + 21, len(data))]
-            outcome = None
-            for _, candle in future.iterrows():
-                if candle["high"] >= sl:
-                    outcome = -1
-                    break
-                if candle["low"] <= tp:
-                    outcome = risk_reward
-                    break
-
-        if outcome is not None:
-            current_r += outcome
-            trades.append({
-                "Time": row["timestamp"],
-                "Direction": direction,
-                "Entry": entry,
-                "Result R": outcome
-            })
-            equity.append(current_r)
-
-    if not trades:
-        return {
-            "trades": [], "win_rate": 0, "profit_factor": 0,
-            "max_drawdown": 0, "net_r": 0, "equity": equity
-        }
-
-    results = [x["Result R"] for x in trades]
-    wins = [x for x in results if x > 0]
-    losses = [x for x in results if x < 0]
-
-    win_rate = (len(wins) / len(results)) * 100
-    gross_profit = sum(wins)
-    gross_loss = abs(sum(losses))
-
-    profit_factor = (gross_profit / gross_loss if gross_loss > 0 else 0)
-
-    eq = np.array(equity)
-    running_max = np.maximum.accumulate(eq)
-    drawdown = eq - running_max
-    max_drawdown = drawdown.min() if len(drawdown) else 0
-
-    return {
-        "trades": trades,
-        "win_rate": win_rate,
-        "profit_factor": profit_factor,
-        "max_drawdown": max_drawdown,
-        "net_r": current_r,
-        "equity": equity
-    }
-
-
-# ============================================================
-# WHALE / LARGE TRADE TRACKER
-# ============================================================
-
-@st.cache_data(ttl=5)
-def fetch_large_trades(symbol, percentile=95):
-    clean = symbol.replace("/", "")
-    data = api_get(
-        f"{BINANCE_API}/api/v3/trades",
-        params={"symbol": clean, "limit": 500},
-        timeout=5
-    )
-
-    if not data:
-        return pd.DataFrame()
-
-    rows = []
-    sizes = []
-
-    for t in data:
-        price = safe_float(t.get("price"))
-        qty = safe_float(t.get("qty"))
-        notional = price * qty
-        sizes.append(notional)
-
-    if not sizes:
-        return pd.DataFrame()
-
-    threshold = np.percentile(sizes, percentile)
-
-    for t in data:
-        price = safe_float(t.get("price"))
-        qty = safe_float(t.get("qty"))
-        notional = price * qty
-
-        if notional >= threshold:
-            side = "SELL 🔴" if t.get("isBuyerMaker") else "BUY 🟢"
-            rows.append({
-                "Time": pd.to_datetime(t["time"], unit="ms").strftime("%H:%M:%S"),
-                "Side": side,
-                "Price": price,
-                "Quantity": qty,
-                "Notional ($)": notional
-            })
-
-    return pd.DataFrame(rows)
-
-
-# ============================================================
-# GATEKEEPER
-# ============================================================
-
-def gatekeeper(score, rrr, trend_4h, structure, orderbook):
-    checks = {}
-    checks["Signal Score >= 70"] = score >= 70
-    checks["RRR >= 1.5"] = rrr >= 1.5
-    checks["4H Trend Confirmed"] = trend_4h != "NEUTRAL"
-    checks["Market Structure"] = structure["direction"] != "NEUTRAL"
-    checks["Order Book Confirmation"] = abs(orderbook["imbalance"]) >= 5
-    return checks
-
-
-# ============================================================
-# TELEGRAM
-# ============================================================
-
-def send_telegram(message):
-    try:
-        if (
-            "telegram" not in st.secrets
-            or "token" not in st.secrets["telegram"]
-            or "chat_id" not in st.secrets["telegram"]
-        ):
-            return False
-
-        token = st.secrets["telegram"]["token"]
-        chat_id = st.secrets["telegram"]["chat_id"]
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-
-        response = requests.post(
-            url,
-            json={"chat_id": chat_id, "text": message},
-            timeout=5
-        )
-        return response.status_code == 200
-    except:
-        return False
-
-
-# ============================================================
-# HEADER
+# HEADER & SIDEBAR SETUP
 # ============================================================
 
 st.title("⚡ Ultimate Institutional Trading Terminal V3")
@@ -898,10 +586,6 @@ st.caption(
     "Real Market Data • MTF Confluence • Liquidity • "
     "BOS/MSS • FVG • Order Blocks • Backtesting • Risk Engine"
 )
-
-# ============================================================
-# SIDEBAR
-# ============================================================
 
 st.sidebar.header("🎛 Institutional Control Center")
 
@@ -926,9 +610,10 @@ strategy = st.sidebar.selectbox(
 )
 
 st.sidebar.divider()
+atr_mult_input = st.sidebar.slider("ATR Multiplier for Risk", 1.0, 3.0, 1.5, 0.1)
 
 # ============================================================
-# FETCH MAIN DATA
+# FETCH MAIN DATA & ANALYSIS
 # ============================================================
 
 df = fetch_chart_data(selected_coin, timeframe, 500)
@@ -939,26 +624,13 @@ if df.empty:
     st.error("❌ Market data unavailable. Please check Binance/API connection.")
     st.stop()
 
-# ============================================================
-# CURRENT MARKET
-# ============================================================
-
 live_price = df["close"].iloc[-1]
 atr = df["ATR"].iloc[-1]
-
 if pd.isna(atr) or atr <= 0:
     atr = live_price * 0.01
 
 rsi = df["RSI"].iloc[-1]
 rvol = df["RVOL"].iloc[-1]
-
-ema20 = df["EMA20"].iloc[-1]
-ema50 = df["EMA50"].iloc[-1]
-ema200 = df["EMA200"].iloc[-1]
-
-# ============================================================
-# MTF (Multi-Timeframe Analysis)
-# ============================================================
 
 df15 = add_indicators(detect_structure(fetch_chart_data(selected_coin, "15m", 300)))
 df1h = add_indicators(detect_structure(fetch_chart_data(selected_coin, "1h", 300)))
@@ -983,11 +655,10 @@ signal = calculate_signal_score(
 )
 
 # ============================================================
-# DASHBOARD LAYOUT & METRICS
+# DASHBOARD METRICS
 # ============================================================
 
 col1, col2, col3, col4, col5 = st.columns(5)
-
 with col1:
     st.metric("Live Price", format_price(live_price))
 with col2:
@@ -1001,10 +672,15 @@ with col5:
 
 st.divider()
 
-# Main Chart Display
+# ============================================================
+# ENHANCED PLOTLY CHART WITH INSTITUTIONAL MARKINGS
+# ============================================================
+
 st.subheader(f"📊 {selected_coin} - {timeframe} Institutional Chart")
 
 fig = go.Figure()
+
+# Candlestick
 fig.add_trace(go.Candlestick(
     x=df["timestamp"],
     open=df["open"],
@@ -1014,15 +690,68 @@ fig.add_trace(go.Candlestick(
     name="Price"
 ))
 
+# EMAs
 fig.add_trace(go.Scatter(x=df["timestamp"], y=df["EMA20"], line=dict(color="orange", width=1), name="EMA 20"))
 fig.add_trace(go.Scatter(x=df["timestamp"], y=df["EMA50"], line=dict(color="blue", width=1.5), name="EMA 50"))
 fig.add_trace(go.Scatter(x=df["timestamp"], y=df["EMA200"], line=dict(color="purple", width=2), name="EMA 200"))
 
+# Volume POC Horizontal Line
+fig.add_hline(y=poc, line_dash="dot", line_color="yellow", annotation_text=f"POC: {format_price(poc)}", annotation_position="bottom right")
+
+# Plot FVG Zones on Chart
+for fvg in fvgs_bull[-3:]:
+    fig.add_shape(
+        type="rect",
+        x0=fvg["time"], x1=df["timestamp"].iloc[-1],
+        y0=fvg["low"], y1=fvg["high"],
+        line=dict(width=0),
+        fillcolor="rgba(0, 255, 0, 0.15)",
+    )
+
+for fvg in fvgs_bear[-3:]:
+    fig.add_shape(
+        type="rect",
+        x0=fvg["time"], x1=df["timestamp"].iloc[-1],
+        y0=fvg["low"], y1=fvg["high"],
+        line=dict(width=0),
+        fillcolor="rgba(255, 0, 0, 0.15)",
+    )
+
+# Plot Active Trade Guidance Lines if Signal is Long/Short/Wait
+active_dir = signal["direction"] if signal["direction"] != "WAIT" else "LONG"
+sl, tp1, tp2, tp3 = calculate_trade_levels(live_price, atr, active_dir, atr_mult_input)
+
+fig.add_hline(y=live_price, line_dash="dash", line_color="cyan", annotation_text=f"Entry: {format_price(live_price)}", annotation_position="top left")
+fig.add_hline(y=sl, line_dash="dash", line_color="red", annotation_text=f"SL: {format_price(sl)}", annotation_position="bottom left")
+fig.add_hline(y=tp1, line_dash="dash", line_color="green", annotation_text=f"TP1: {format_price(tp1)}", annotation_position="top left")
+
 fig.update_layout(
-    height=600,
+    height=650,
     template="plotly_dark",
     xaxis_rangeslider_visible=False,
     margin=dict(l=10, r=10, t=10, b=10)
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
+# ============================================================
+# SIGNAL BREAKDOWN & INSTITUTIONAL INSIGHTS
+# ============================================================
+
+col_a, col_b = st.columns(2)
+
+with col_a:
+    st.markdown("### 📋 Confluence Checklist")
+    st.write(f"**4H Trend:** {trend_4h}")
+    st.write(f"**1H Trend:** {trend_1h}")
+    st.write(f"**Structure Event:** {structure['event']}")
+    st.write(f"**Liquidity Sweep:** {sweep['type']}")
+    st.write(f"**Order Book Imbalance:** {orderbook['imbalance']:.2f}%")
+
+with col_b:
+    st.markdown("### 🧠 Signal Reasons")
+    if signal["reasons"]:
+        for reason in signal["reasons"]:
+            st.success(f"✔ {reason}")
+    else:
+        st.warning("⚠️ No strong institutional confluence detected yet. Awaiting setup.")
